@@ -2,9 +2,8 @@
  * Health Check & Keep-Alive — Vercel Cron Function
  *
  * Runs every 5 minutes (configured in vercel.json). Checks:
- * 1. EasyTerritory (Moss + Renolution) — exercises full login + territory lookup
- * 2. Cloudflare Turnstile — verifies API reachable and secret key valid
- * 3. HubSpot Forms API — verifies endpoint is responding
+ * 1. Cloudflare Turnstile — verifies API reachable and secret key valid
+ * 2. HubSpot Forms API — verifies endpoint is responding
  *
  * Tracks failure state across runs in Upstash Redis to send:
  * - One alert when a service goes down (not on every subsequent run)
@@ -14,20 +13,15 @@
  * - CRON_SECRET (Vercel sets Authorization: Bearer <CRON_SECRET> on cron invocations)
  * - TURNSTILE_SECRET_KEY (for Turnstile health check)
  * - HUBSPOT_PORTAL_ID, HUBSPOT_FORM_ID (for HubSpot health check)
- * - EASYTERRITORY_* (see lib/easyterritory.js)
- * - RENOLUTION_EASYTERRITORY_PROJECT_ID (optional)
  * - UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN (auto-set by Vercel Marketplace integration)
  */
 import { Redis } from '@upstash/redis';
-import { lookupCalendarUrl, lookupRenolutionCalendarUrl } from '../lib/easyterritory.js';
 import { sendAlert } from '../lib/alerts.js';
 
 const ALERT_SOURCE = 'Keep-Alive Health Check';
 const REDIS_KEY = 'keepalive:failures';
 
 const SERVICE_LABELS = {
-  moss: 'EasyTerritory (Moss)',
-  renolution: 'EasyTerritory (Renolution)',
   turnstile: 'Cloudflare Turnstile',
   hubspot: 'HubSpot Forms API',
 };
@@ -69,24 +63,10 @@ export default async function handler(req, res) {
   }
 
   // Run all health checks in parallel
-  const [mossResult, renolutionResult, turnstileResult, hubspotResult] = await Promise.allSettled([
-    lookupCalendarUrl('22030'),
-    lookupRenolutionCalendarUrl('22030'),
+  const [turnstileResult, hubspotResult] = await Promise.allSettled([
     checkTurnstile(),
     checkHubSpot(),
   ]);
-
-  const moss = {
-    success: mossResult.status === 'fulfilled',
-    calendarUrl: mossResult.status === 'fulfilled' ? (mossResult.value || null) : null,
-    error: mossResult.status === 'rejected' ? mossResult.reason.message : undefined,
-  };
-
-  const renolution = {
-    success: renolutionResult.status === 'fulfilled',
-    calendarUrl: renolutionResult.status === 'fulfilled' ? (renolutionResult.value || null) : null,
-    error: renolutionResult.status === 'rejected' ? renolutionResult.reason.message : undefined,
-  };
 
   const turnstile = {
     success: turnstileResult.status === 'fulfilled' && turnstileResult.value.success,
@@ -105,13 +85,11 @@ export default async function handler(req, res) {
   // Build current failure state
   const now = Date.now();
   const currentFailures = {};
-  if (!moss.success) currentFailures.moss = { error: moss.error || 'unknown', since: now };
-  if (!renolution.success) currentFailures.renolution = { error: renolution.error || 'unknown', since: now };
   if (!turnstile.success) currentFailures.turnstile = { error: turnstile.error || 'unknown', since: now };
   if (!hubspot.success) currentFailures.hubspot = { error: hubspot.error || 'unknown', since: now };
 
   console.log(
-    `[KeepAlive] Moss: ${moss.success ? 'OK' : 'FAIL'} — Renolution: ${renolution.success ? 'OK' : 'FAIL'} — Turnstile: ${turnstile.success ? 'OK' : 'FAIL'} — HubSpot: ${hubspot.success ? 'OK' : 'FAIL'}`
+    `[KeepAlive] Turnstile: ${turnstile.success ? 'OK' : 'FAIL'} — HubSpot: ${hubspot.success ? 'OK' : 'FAIL'}`
   );
 
   // Compare with previous run state for new-failure / recovery detection
@@ -184,8 +162,6 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     success: Object.keys(currentFailures).length === 0,
-    moss,
-    renolution,
     turnstile,
     hubspot,
     transitions: {
