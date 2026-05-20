@@ -1,0 +1,20 @@
+{
+  "name": "warranty-form-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "npx playwright test --config tests/e2e/playwright.config.js",
+    "test:e2e:headed": "npx playwright test --config tests/e2e/playwright.config.js --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.37.0"
+  }
+}

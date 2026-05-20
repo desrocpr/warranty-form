@@ -1,0 +1,80 @@
+[
+  {
+    "name": "turnstile_site_key",
+    "label": "Cloudflare Turnstile Site Key",
+    "type": "text",
+    "default": "",
+    "required": false,
+    "help_text": "Cloudflare Turnstile site key for bot protection. Leave empty to disable."
+  },
+  {
+    "name": "submit_endpoint_url",
+    "label": "Form Submit Endpoint URL",
+    "type": "text",
+    "default": "",
+    "required": true,
+    "help_text": "Vercel serverless function URL (e.g., https://your-app.vercel.app/api/submit-contact)"
+  },
+  {
+    "name": "submit_button_color",
+    "label": "Submit Button Color",
+    "type": "text",
+    "default": "#4c711d",
+    "required": false,
+    "help_text": "Hex color for the submit button (default: #4c711d)"
+  },
+  {
+    "name": "header_text",
+    "label": "Header Text",
+    "type": "text",
+    "default": "Schedule Your Free In-Home Consultation",
+    "required": false
+  },
+  {
+    "name": "subheader_text",
+    "label": "Subheader Text",
+    "type": "richtext",
+    "default": "",
+    "required": false,
+    "help_text": "Optional description text below the header"
+  },
+  {
+    "name": "show_sms_consent",
+    "label": "Show SMS Consent Checkbox",
+    "type": "boolean",
+    "default": true,
+    "help_text": "Toggle the SMS opt-in consent checkbox"
+  },
+  {
+    "name": "callback_api_key",
+    "label": "Callback API Key",
+    "type": "text",
+    "default": "",
+    "required": false,
+    "help_text": "API key for authenticating booking-callback and client-error requests. Must match CONTACT_API_KEY on Vercel."
+  },
+  {
+    "name": "excluded_project_types",
+    "label": "Excluded Project Types",
+    "type": "text",
+    "default": "",
+    "required": false,
+    "help_text": "Semicolon-separated list of project type values to hide from the form (e.g., 'Handyman Services;Other'). Use semicolons because some values contain commas. Must match HubSpot property option values exactly."
+  },
+  {
+    "name": "fallback_calendar_url",
+    "label": "Fallback Calendar URL",
+    "type": "text",
+    "default": "https://www.mossbuildinganddesign.com/default-meetings",
+    "required": false,
+    "help_text": "Direct link shown to customers when the API or calendar embeds fail to load."
+  },
+  {
+    "name": "section_text",
+    "label": "Section Text",
+    "type": "richtext",
+    "default": "<h3>What's Next?</h3><p>At MOSS Building &amp; Design, we know that starting a remodel can feel like a big step. That's why our process is designed to make it easy, transparent, and within alignment of your schedule. When you reach out, you'll connect directly with a <strong>Project Developer</strong>, not a commissioned salesperson.</p><h4>1. Virtual Discovery Session <span style=\"font-weight: normal; font-size: 0.85em; opacity: 0.85;\">(30 minutes, virtual - Microsoft Teams)</span></h4><p>A quick, friendly chat to learn more about your project goals, timeline, and budget. We'll answer your questions and see if MOSS is the right fit.</p><h4>2. In-Home Appointment <span style=\"font-weight: normal; font-size: 0.85em; opacity: 0.85;\">(1 hour)</span></h4><p>Your Project Developer will visit your home to get a feel for the space and gather details. Using precision LIDAR scanning technology, we'll capture measurements to help start shaping your ideas.</p><h4>3. Project Presentation <span style=\"font-weight: normal; font-size: 0.85em; opacity: 0.85;\">(~1 hour, virtual meeting)</span></h4><p>You'll meet with your dedicated MOSS team—Designer, Architect, and Project Manager—to explore solutions tailored to your needs. You'll review concept directions and budget options before making any commitments.</p><h4>4. Risk-Free Next Step</h4><p>When you're ready to move forward, you'll sign a contract and place a $2,500 deposit, which is fully refundable through the first design review.</p>",
+    "required": false,
+    "help_text": "Rich text content displayed alongside the form. Supports custom formatting."
+  }
+]

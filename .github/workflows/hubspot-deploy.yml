@@ -1,0 +1,28 @@
+name: Deploy to HubSpot
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'hubspot/modules/**'
+      - '.github/workflows/hubspot-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Deploy to HubSpot
+        env:
+          HUBSPOT_PORTAL_ID: ${{ secrets.HUBSPOT_PORTAL_ID }}
+          HUBSPOT_PERSONAL_ACCESS_KEY: ${{ secrets.HUBSPOT_PERSONAL_ACCESS_KEY }}
+        run: npx --yes --package=@hubspot/cli@7.9.0 --call='hs upload hubspot/modules moss-contact-form/modules --use-env'

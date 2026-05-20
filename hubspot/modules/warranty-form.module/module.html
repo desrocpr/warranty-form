@@ -1,0 +1,295 @@
+<!--
+  MOSS Contact Form - HubSpot Custom Module (Accordion Multi-Step)
+
+  Process overview → Form → Calendar embed → Confirmation
+-->
+
+{% if module.turnstile_site_key %}
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+{% endif %}
+
+{% set firstname_prop = crm_property_definition("contact", "firstname") %}
+{% set lastname_prop = crm_property_definition("contact", "lastname") %}
+{% set email_prop = crm_property_definition("contact", "email") %}
+{% set phone_prop = crm_property_definition("contact", "phone") %}
+{% set state_prop = crm_property_definition("contact", "state_contact_form") %}
+{% set zip_prop = crm_property_definition("contact", "zip") %}
+{% set project_prop = crm_property_definition("contact", "please_select_the_project_types_that_most_closely_match_your_current_request_") %}
+{% set howheard_prop = crm_property_definition("contact", "how_did_you_hear_about_us_") %}
+
+<div class="moss-contact-form-container">
+  <!-- Header -->
+  <div class="contact-form-header">
+    {% if module.header_text %}
+      <h2>{{ module.header_text }}</h2>
+    {% endif %}
+    {% if module.subheader_text %}
+      <div class="contact-form-subheader">{{ module.subheader_text }}</div>
+    {% endif %}
+  </div>
+
+  <!-- Opening Statement -->
+  <div class="opening-statement">
+    {{ module.section_text }}
+  </div>
+
+  <!-- Process Steps -->
+  <div class="process-row">
+    <div class="process-card">
+      <div class="process-num">1</div>
+      <div class="process-title">Virtual Discovery</div>
+      <div class="process-desc">30 min video chat to discuss your project</div>
+    </div>
+    <div class="process-card">
+      <div class="process-num">2</div>
+      <div class="process-title">In-Home Visit</div>
+      <div class="process-desc">We measure and understand your space</div>
+    </div>
+    <div class="process-card">
+      <div class="process-num">3</div>
+      <div class="process-title">Project Presentation</div>
+      <div class="process-desc">Meet your team and review options</div>
+    </div>
+    <div class="process-card">
+      <div class="process-num">4</div>
+      <div class="process-title">Risk-Free Next Step</div>
+      <div class="process-desc">$2,500 fully refundable deposit to begin</div>
+    </div>
+  </div>
+
+  <!-- Divider -->
+  <div class="section-divider">
+    <span>Get Started Below</span>
+  </div>
+
+  <!-- Accordion Steps -->
+
+  <!-- ================================================================= -->
+  <!-- STEP 1: Your Information -->
+  <!-- ================================================================= -->
+  <div class="accordion-card active" id="accordion-step-1" data-step="1">
+    <div class="accordion-header" onclick="window.MOSS_ACCORDION && window.MOSS_ACCORDION.toggle(1)">
+      <div class="step-badge">1</div>
+      <div class="step-title">
+        <h3>Your Information</h3>
+        <p>Tell us about your project</p>
+      </div>
+      <div class="step-chevron">&#9662;</div>
+    </div>
+
+    <div class="step-summary" id="step-1-summary"></div>
+
+    <div class="accordion-body">
+      <div class="accordion-body-inner">
+        <!-- Status Messages -->
+        <div id="contact-form-status" class="contact-form-status"></div>
+
+        <!-- Loading Overlay -->
+        <div id="contact-form-loading" class="contact-form-loading">
+          <div class="contact-form-spinner"></div>
+          <p>Finding your project team...</p>
+        </div>
+
+        <form id="moss-contact-form" novalidate>
+          <!-- Row 1: First Name / Last Name -->
+          <div class="form-row two-col">
+            <div class="form-group">
+              <label for="cf-firstname">{{ firstname_prop.label }} <span class="required">*</span></label>
+              <input type="text" id="cf-firstname" name="firstname" required autocomplete="given-name">
+              <div class="field-error" id="error-firstname"></div>
+            </div>
+            <div class="form-group">
+              <label for="cf-lastname">{{ lastname_prop.label }} <span class="required">*</span></label>
+              <input type="text" id="cf-lastname" name="lastname" required autocomplete="family-name">
+              <div class="field-error" id="error-lastname"></div>
+            </div>
+          </div>
+
+          <!-- Row 2: Email / Phone -->
+          <div class="form-row two-col">
+            <div class="form-group">
+              <label for="cf-email">{{ email_prop.label }} <span class="required">*</span></label>
+              <input type="email" id="cf-email" name="email" required autocomplete="email">
+              <div class="field-error" id="error-email"></div>
+            </div>
+            <div class="form-group">
+              <label for="cf-phone">{{ phone_prop.label }} <span class="required">*</span></label>
+              <input type="tel" id="cf-phone" name="phone" required autocomplete="tel">
+              <div class="field-error" id="error-phone"></div>
+            </div>
+          </div>
+
+          <!-- Row 3: State / Zip -->
+          <div class="form-row two-col">
+            <div class="form-group">
+              <label for="cf-state">{{ state_prop.label }} <span class="required">*</span></label>
+              <select id="cf-state" name="state_contact_form" required>
+                <option value="">Please Select</option>
+                {% for option in state_prop.options %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+              </select>
+              <div class="field-error" id="error-state"></div>
+            </div>
+            <div class="form-group">
+              <label for="cf-zip">{{ zip_prop.label }} <span class="required">*</span></label>
+              <input type="text" id="cf-zip" name="zip" maxlength="5" required autocomplete="postal-code" inputmode="numeric" pattern="[0-9]{5}">
+              <div class="field-error" id="error-zip"></div>
+            </div>
+          </div>
+
+          <!-- Project Types (Checkbox Grid) -->
+          <div class="form-group full-width">
+            <label>{{ project_prop.label }} <span class="required">*</span></label>
+            {% set excluded_list = module.excluded_project_types|split(";")|map("trim") %}
+            <div class="checkbox-grid" id="cf-project-types">
+              {% for option in project_prop.options %}
+                {% if option.value not in excluded_list %}
+                <label class="checkbox-label">
+                  <input type="checkbox" name="project_types" value="{{ option.value }}">
+                  <span>{{ option.label }}</span>
+                </label>
+                {% endif %}
+              {% endfor %}
+            </div>
+            <div class="field-error" id="error-project-types"></div>
+          </div>
+
+          <!-- How Did You Hear About Us -->
+          <div class="form-group full-width">
+            <label for="cf-how-heard">{{ howheard_prop.label }} <span class="required">*</span></label>
+            <select id="cf-how-heard" name="how_did_you_hear_about_us_" required>
+              <option value="">Please Select</option>
+              {% for option in howheard_prop.options %}
+                <option value="{{ option.value }}">{{ option.label }}</option>
+              {% endfor %}
+            </select>
+            <div class="field-error" id="error-how-heard"></div>
+          </div>
+
+          <!-- Conditional: Referral Name -->
+          <div class="form-group full-width conditional-field" id="referral-name-group" style="display: none;">
+            <label for="cf-referral-name">Referral Name</label>
+            <input type="text" id="cf-referral-name" name="referral_name">
+          </div>
+
+          <!-- Conditional: Event Details -->
+          <div class="form-group full-width conditional-field" id="event-details-group" style="display: none;">
+            <label for="cf-event-details">Event Details</label>
+            <input type="text" id="cf-event-details" name="event_details">
+          </div>
+
+          <!-- SMS Consent -->
+          {% if module.show_sms_consent %}
+          <div class="form-group full-width consent-group">
+            <label class="checkbox-label consent-label">
+              <input type="checkbox" id="cf-sms-consent" name="sms_consent">
+              <span>I agree to receive text messages from Moss Building & Design. Message and data rates may apply. Reply STOP to opt out.</span>
+            </label>
+          </div>
+          {% endif %}
+
+          <!-- Processing Consent -->
+          <div class="form-group full-width consent-group">
+            <label class="checkbox-label consent-label">
+              <input type="checkbox" id="cf-processing-consent" name="processing_consent">
+              <span>I agree to allow Moss Building & Design to store and process my personal data.</span>
+            </label>
+          </div>
+
+          <!-- Hidden Fields -->
+          <input type="hidden" id="cf-natalie-chat-transcript" name="natalie_chat_transcript">
+          <input type="hidden" id="cf-utm-campaign" name="utm_campaign">
+          <input type="hidden" id="cf-utm-term" name="utm_term">
+          <input type="hidden" id="cf-utm-source" name="utm_source">
+          <input type="hidden" id="cf-utm-content" name="utm_content">
+          <input type="hidden" id="cf-utm-medium" name="utm_medium">
+
+          <!-- Turnstile Widget -->
+          {% if module.turnstile_site_key %}
+          <div id="cf-turnstile-container" class="turnstile-wrapper"></div>
+          {% endif %}
+
+          <!-- Submit Button -->
+          <div class="form-group full-width submit-group">
+            <button type="submit" id="cf-submit-btn" class="contact-submit-btn" {% if module.submit_button_color %}style="background-color: {{ module.submit_button_color }};"{% endif %}>
+              Next: Schedule
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- STEP 2: Schedule a Meeting -->
+  <!-- ================================================================= -->
+  <div class="accordion-card locked" id="accordion-step-2" data-step="2">
+    <div class="accordion-header" onclick="window.MOSS_ACCORDION && window.MOSS_ACCORDION.toggle(2)">
+      <div class="step-badge">2</div>
+      <div class="step-title">
+        <h3>Schedule</h3>
+        <p>Pick a time that works for you</p>
+      </div>
+      <div class="step-chevron">&#9662;</div>
+    </div>
+
+    <div class="step-summary" id="step-2-summary"></div>
+
+    <div class="accordion-body">
+      <div class="accordion-body-inner">
+        <div id="calendar-embed-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- STEP 3: Confirmation -->
+  <!-- ================================================================= -->
+  <div class="accordion-card locked" id="accordion-step-3" data-step="3">
+    <div class="accordion-header" onclick="window.MOSS_ACCORDION && window.MOSS_ACCORDION.toggle(3)">
+      <div class="step-badge">3</div>
+      <div class="step-title">
+        <h3>Confirmed</h3>
+        <p>You're all set</p>
+      </div>
+      <div class="step-chevron">&#9662;</div>
+    </div>
+
+    <div class="accordion-body">
+      <div class="accordion-body-inner">
+        <div class="confirmation-content">
+          <div class="confirmation-check">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </div>
+          <h4>You're All Set!</h4>
+          <p>Your discovery meeting has been scheduled. We look forward to learning about your project.</p>
+
+          <div class="confirmation-next-steps">
+            <h5>What Happens Next</h5>
+            <ul>
+              <li>You'll receive a calendar invitation via email</li>
+              <li>Your Project Developer will join the Teams meeeting at the scheduled time</li>
+              <li>The meeting is a quick 30-minute virtual chat</li>
+              <li>No commitment required &mdash; just a friendly conversation</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Pass HubL config to JavaScript -->
+<script>
+  window.MOSS_CONTACT_CONFIG = {
+    submitEndpointUrl: '{{ module.submit_endpoint_url }}',
+    turnstileSiteKey: '{{ module.turnstile_site_key }}',
+    callbackApiKey: '{{ module.callback_api_key }}',
+    fallbackCalendarUrl: '{{ module.fallback_calendar_url }}',
+    referralValue: '{{ howheard_prop.options|selectattr("label", "equalto", "Referred by a Friend")|map("value")|first }}',
+    communitySponsorshipValue: '{{ howheard_prop.options|selectattr("label", "equalto", "Community Sponsorship")|map("value")|first }}',
+    eventValue: '{{ howheard_prop.options|selectattr("label", "equalto", "Event")|map("value")|first }}'
+  };
+</script>

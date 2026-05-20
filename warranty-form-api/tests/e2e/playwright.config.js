@@ -1,0 +1,19 @@
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  testDir: '.',
+  timeout: 30000,
+  retries: 1,
+  use: {
+    baseURL: 'https://www.mossbuildinganddesign.com',
+    screenshot: 'only-on-failure',
+    trace: 'on-first-retry',
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { browserName: 'chromium' },
+    },
+  ],
+  reporter: [['list']],
+});
