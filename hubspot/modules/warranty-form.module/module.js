@@ -785,6 +785,26 @@
     .then(function(result) {
       showLoading(false);
 
+      // MOS-206: warranty flow redirects to cal.com instead of embedding a calendar.
+      // When the API returns a `bookingUrl`, short-circuit the embed branch and redirect.
+      // If `success: true` but `bookingUrl` is missing/null, log to client-error
+      // and fall back to the configured fallback calendar URL.
+      if (result.ok && result.data && result.data.success && result.data.bookingUrl !== undefined) {
+        if (result.data.bookingUrl) {
+          performBookingRedirect(result.data.bookingUrl, result.data.ticketId);
+        } else {
+          reportClientError('cal_com_url_missing', 'API returned success but bookingUrl was null/empty');
+          var missingConfig = getConfig();
+          var missingFallback = missingConfig.fallbackCalendarUrl;
+          if (typeof missingFallback === 'string' && missingFallback) {
+            performBookingRedirect(missingFallback, result.data.ticketId);
+          } else {
+            showStatus('Your warranty claim has been submitted, but our scheduling link is temporarily unavailable. A member of our team will reach out to schedule your appointment.', false);
+          }
+        }
+        return;
+      }
+
       if (result.ok && result.data.success && result.data.calendarUrl) {
         // Populate step 1 summary and advance to step 2
         populateStep1Summary(formData);
@@ -820,6 +840,30 @@
       }
       resetTurnstile();
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Booking Redirect (MOS-206)
+  // ---------------------------------------------------------------------------
+
+  // Show a "submitted, redirecting…" status and navigate to the cal.com booking URL
+  // after a short pause so the user can read the confirmation. Tolerates a missing
+  // ticketId by falling back to a generic confirmation message.
+  function performBookingRedirect(bookingUrl, ticketId) {
+    var statusEl = document.getElementById('contact-form-status');
+    var message = ticketId
+      ? 'Your warranty claim has been submitted (Ticket #' + ticketId + '). Redirecting to schedule…'
+      : 'Your warranty claim has been submitted. Redirecting to schedule…';
+
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.className = 'contact-form-status status-success';
+      statusEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    setTimeout(function() {
+      window.location.href = bookingUrl;
+    }, 2000);
   }
 
   // ---------------------------------------------------------------------------
