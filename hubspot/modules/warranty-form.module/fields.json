@@ -19,22 +19,22 @@
     "name": "submit_button_color",
     "label": "Submit Button Color",
     "type": "text",
-    "default": "#4c711d",
+    "default": "#6B6457",
     "required": false,
-    "help_text": "Hex color for the submit button (default: #4c711d)"
+    "help_text": "Hex color for the submit button (default: #6B6457, warm gray for warranty)"
   },
   {
     "name": "header_text",
     "label": "Header Text",
     "type": "text",
-    "default": "Schedule Your Free In-Home Consultation",
+    "default": "MOSS Warranty Claim",
     "required": false
   },
   {
     "name": "subheader_text",
     "label": "Subheader Text",
     "type": "richtext",
-    "default": "",
+    "default": "Tell us what's going on — we'll get you on the calendar to take a look.",
     "required": false,
     "help_text": "Optional description text below the header"
   },
