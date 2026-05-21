@@ -8,7 +8,8 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:e2e": "npx playwright test --config tests/e2e/playwright.config.js",
-    "test:e2e:headed": "npx playwright test --config tests/e2e/playwright.config.js --headed"
+    "test:e2e:headed": "npx playwright test --config tests/e2e/playwright.config.js --headed",
+    "test:smoke": "RUN_SMOKE=1 npx playwright test --config tests/e2e/playwright.config.js tests/e2e/smoke.test.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",
