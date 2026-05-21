@@ -613,6 +613,52 @@
 
 .warranty-success-message[hidden] {
   display: none;
+
+/* =============================================================================
+   Photo Upload (MOS-205)
+   Functional styling only; visual polish lives in MOS-207.
+   ============================================================================= */
+
+.cf-photo-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.cf-photo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: #2d2d2d;
+}
+
+.cf-photo-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-photo-status {
+  color: #555;
+  font-size: 12px;
+}
+
+.cf-photo-retry {
+  background: #4c711d;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cf-photo-retry:hover {
+  background: #3d5c16;
 }
 
 /* =============================================================================

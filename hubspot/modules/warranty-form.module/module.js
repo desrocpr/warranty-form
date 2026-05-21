@@ -508,6 +508,164 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Photo Upload (MOS-205)
+  //
+  // Uploads warranty photos one-at-a-time to /api/upload-photo as soon as the
+  // user picks them, so the main form submit (MOS-204) stays fast and only
+  // carries a list of URLs rather than file blobs.
+  //
+  // This module is intentionally defensive: if the warranty form HTML
+  // (`#cf-photo-input` — added by MOS-203) is not in the DOM, the function
+  // no-ops. The hidden `#cf-photo-urls` field is created lazily here so
+  // MOS-205 stays self-contained whether MOS-203 lands first or after.
+  // ---------------------------------------------------------------------------
+
+  // Allowed types must mirror the server-side allow-list in
+  // warranty-form-api/api/upload-photo.js
+  var ALLOWED_PHOTO_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  var MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+  function getUploadEndpointUrl() {
+    var config = getConfig();
+    var baseUrl = config.submitEndpointUrl;
+    if (!baseUrl) return null;
+    // Mirrors the pattern used by reportClientError / booking-callback above.
+    return baseUrl.replace('/submit-contact', '/upload-photo')
+                  .replace('/submit-warranty', '/upload-photo');
+  }
+
+  function ensurePhotoUrlsField(input) {
+    var existing = document.getElementById('cf-photo-urls');
+    if (existing) return existing;
+    // If MOS-203 didn't add the hidden field, create it next to the file input
+    // so the main form submission picks it up.
+    var hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.id = 'cf-photo-urls';
+    hidden.name = 'photo_urls';
+    hidden.value = '[]';
+    var parent = (input && input.parentNode) || document.body;
+    parent.appendChild(hidden);
+    return hidden;
+  }
+
+  function ensurePhotoListContainer(input) {
+    var existing = document.getElementById('cf-photo-list');
+    if (existing) return existing;
+    var container = document.createElement('ul');
+    container.id = 'cf-photo-list';
+    container.className = 'cf-photo-list';
+    var parent = (input && input.parentNode) || document.body;
+    parent.appendChild(container);
+    return container;
+  }
+
+  function setupPhotoUpload() {
+    var input = document.getElementById('cf-photo-input');
+    if (!input) return; // MOS-203 owns the HTML — if it's absent, no-op.
+
+    var endpointUrl = getUploadEndpointUrl();
+    if (!endpointUrl) return;
+
+    var hiddenField = ensurePhotoUrlsField(input);
+    var listContainer = ensurePhotoListContainer(input);
+
+    // Active list of uploaded URLs (kept in lockstep with hiddenField.value)
+    var uploadedUrls = [];
+
+    function commitUrls() {
+      hiddenField.value = JSON.stringify(uploadedUrls);
+    }
+
+    function makeRow(file) {
+      var li = document.createElement('li');
+      li.className = 'cf-photo-row';
+
+      var name = document.createElement('span');
+      name.className = 'cf-photo-name';
+      name.textContent = file.name;
+      li.appendChild(name);
+
+      var status = document.createElement('span');
+      status.className = 'cf-photo-status';
+      status.textContent = 'Uploading…';
+      li.appendChild(status);
+
+      var retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.className = 'cf-photo-retry';
+      retryBtn.textContent = 'Retry';
+      retryBtn.style.display = 'none';
+      li.appendChild(retryBtn);
+
+      listContainer.appendChild(li);
+      return { li: li, status: status, retryBtn: retryBtn };
+    }
+
+    function uploadOne(file, row) {
+      // Client-side guard rails mirror server-side validation so users get
+      // immediate feedback instead of a 413/415 round-trip.
+      if (ALLOWED_PHOTO_MIME_TYPES.indexOf(file.type) === -1) {
+        row.status.textContent = 'Unsupported file type (jpg, png, webp only)';
+        row.retryBtn.style.display = 'none';
+        return;
+      }
+      if (file.size > MAX_PHOTO_BYTES) {
+        row.status.textContent = 'File too large (max 5 MB)';
+        row.retryBtn.style.display = 'none';
+        return;
+      }
+
+      row.status.textContent = 'Uploading…';
+      row.retryBtn.style.display = 'none';
+
+      var formData = new FormData();
+      formData.append('photo', file, file.name);
+
+      fetch(endpointUrl, {
+        method: 'POST',
+        body: formData
+      })
+        .then(function(resp) {
+          return resp.json().then(function(data) {
+            return { ok: resp.ok, status: resp.status, data: data };
+          });
+        })
+        .then(function(result) {
+          if (result.ok && result.data && result.data.url) {
+            uploadedUrls.push(result.data.url);
+            commitUrls();
+            row.status.textContent = 'Uploaded ✓';
+          } else {
+            var msg = (result.data && result.data.error) || ('Upload failed (' + result.status + ')');
+            row.status.textContent = msg;
+            row.retryBtn.style.display = '';
+          }
+        })
+        .catch(function(err) {
+          row.status.textContent = 'Upload failed — check your connection';
+          row.retryBtn.style.display = '';
+          reportClientError('photo_upload_error', (err && err.message) || 'Upload fetch failed');
+        });
+    }
+
+    input.addEventListener('change', function(e) {
+      var files = e.target && e.target.files ? e.target.files : [];
+      for (var i = 0; i < files.length; i++) {
+        (function(file) {
+          var row = makeRow(file);
+          row.retryBtn.addEventListener('click', function() {
+            uploadOne(file, row);
+          });
+          uploadOne(file, row);
+        })(files[i]);
+      }
+      // Reset value so re-selecting the same file re-fires `change`.
+      input.value = '';
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Zip Code Formatting
   // ---------------------------------------------------------------------------
 
@@ -957,6 +1115,7 @@
     setupConditionalFields();
     setupPhoneFormatting();
     setupZipFormatting();
+    setupPhotoUpload();
     initTurnstile();
     updateStepUI();
 

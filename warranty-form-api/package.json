@@ -16,6 +16,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@upstash/redis": "^1.37.0"
+    "@upstash/redis": "^1.37.0",
+    "@vercel/blob": "^2.4.0"
   }
 }
