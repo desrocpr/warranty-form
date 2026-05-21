@@ -1,13 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock the easyterritory module
-const mockLookup = vi.fn();
-const mockRenolutionLookup = vi.fn();
-vi.mock('../../lib/easyterritory.js', () => ({
-  lookupCalendarUrl: (...args) => mockLookup(...args),
-  lookupRenolutionCalendarUrl: (...args) => mockRenolutionLookup(...args),
-}));
-
 // Mock the alerts module
 const mockSendAlert = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../lib/alerts.js', () => ({
@@ -78,8 +70,6 @@ describe('keep-alive handler', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    mockLookup.mockReset();
-    mockRenolutionLookup.mockReset();
     mockSendAlert.mockClear();
     mockFetch.mockReset();
     mockRedisGet.mockClear();
@@ -136,9 +126,6 @@ describe('keep-alive handler', () => {
   });
 
   it('returns 200 with all service results on success', async () => {
-    mockLookup.mockResolvedValue('https://calendly.com/alpha');
-    mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
-
     const res = createRes();
     await handler(
       createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
@@ -146,67 +133,12 @@ describe('keep-alive handler', () => {
     );
     expect(res._status).toBe(200);
     expect(res._json.success).toBe(true);
-    expect(res._json.moss.success).toBe(true);
-    expect(res._json.moss.calendarUrl).toBe('https://calendly.com/alpha');
-    expect(res._json.renolution.success).toBe(true);
-    expect(res._json.renolution.calendarUrl).toBe('https://calendly.com/renolution');
     expect(res._json.turnstile.success).toBe(true);
     expect(res._json.hubspot.success).toBe(true);
     expect(res._json.timestamp).toBeDefined();
   });
 
-  it('calls lookupCalendarUrl with 22030', async () => {
-    mockLookup.mockResolvedValue(null);
-    mockRenolutionLookup.mockResolvedValue(null);
-
-    const res = createRes();
-    await handler(
-      createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
-      res
-    );
-    expect(mockLookup).toHaveBeenCalledWith('22030');
-    expect(mockRenolutionLookup).toHaveBeenCalledWith('22030');
-  });
-
-  it('reports Moss failure while Renolution succeeds', async () => {
-    mockLookup.mockRejectedValue(new Error('Moss ET down'));
-    mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
-
-    const res = createRes();
-    await handler(
-      createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
-      res
-    );
-    expect(res._status).toBe(200);
-    expect(res._json.success).toBe(false); // At least one failure = not fully healthy
-    expect(res._json.moss.success).toBe(false);
-    expect(res._json.moss.error).toBe('Moss ET down');
-    expect(res._json.renolution.success).toBe(true);
-    // Alert should have been called
-    expect(mockSendAlert).toHaveBeenCalledTimes(1);
-    expect(mockSendAlert.mock.calls[0][0]).toContain('1 service(s) down');
-  });
-
-  it('reports both EasyTerritory failures', async () => {
-    mockLookup.mockRejectedValue(new Error('Moss ET down'));
-    mockRenolutionLookup.mockRejectedValue(new Error('Renolution ET down'));
-
-    const res = createRes();
-    await handler(
-      createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
-      res
-    );
-    expect(res._status).toBe(200);
-    expect(res._json.success).toBe(false);
-    expect(res._json.moss.error).toBe('Moss ET down');
-    expect(res._json.renolution.error).toBe('Renolution ET down');
-    expect(mockSendAlert).toHaveBeenCalledTimes(1);
-  });
-
   it('reports Turnstile failure', async () => {
-    mockLookup.mockResolvedValue('https://calendly.com/alpha');
-    mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
-
     mockFetch.mockImplementation((url) => {
       if (url.includes('turnstile')) {
         return Promise.resolve({
@@ -231,9 +163,6 @@ describe('keep-alive handler', () => {
   });
 
   it('reports HubSpot 500 failure', async () => {
-    mockLookup.mockResolvedValue('https://calendly.com/alpha');
-    mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
-
     mockFetch.mockImplementation((url) => {
       if (url.includes('turnstile')) {
         return Promise.resolve({
@@ -258,9 +187,6 @@ describe('keep-alive handler', () => {
   });
 
   it('does not alert when all services are healthy', async () => {
-    mockLookup.mockResolvedValue('https://calendly.com/alpha');
-    mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
-
     const res = createRes();
     await handler(
       createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
@@ -270,29 +196,11 @@ describe('keep-alive handler', () => {
     expect(mockSendAlert).not.toHaveBeenCalled();
   });
 
-  it('returns null calendarUrl when lookups return null', async () => {
-    mockLookup.mockResolvedValue(null);
-    mockRenolutionLookup.mockResolvedValue(null);
-
-    const res = createRes();
-    await handler(
-      createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
-      res
-    );
-    expect(res._status).toBe(200);
-    expect(res._json.success).toBe(true);
-    expect(res._json.moss.calendarUrl).toBeNull();
-    expect(res._json.renolution.calendarUrl).toBeNull();
-  });
-
   it('skips Turnstile check when TURNSTILE_SECRET_KEY not configured', async () => {
     delete process.env.TURNSTILE_SECRET_KEY;
     vi.resetModules();
     setupHealthyFetch();
     const mod = await import('../../api/keep-alive.js');
-
-    mockLookup.mockResolvedValue('https://calendly.com/alpha');
-    mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
 
     const res = createRes();
     await mod.default(
@@ -308,8 +216,18 @@ describe('keep-alive handler', () => {
 
   describe('source tagging and recovery', () => {
     it('passes Keep-Alive Health Check source to sendAlert', async () => {
-      mockLookup.mockRejectedValue(new Error('Moss ET down'));
-      mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
+      mockFetch.mockImplementation((url) => {
+        if (url.includes('turnstile')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ success: false, 'error-codes': ['invalid-input-secret'] }),
+          });
+        }
+        if (url.includes('hsforms')) {
+          return Promise.resolve({ status: 400, ok: false });
+        }
+        return Promise.resolve({ ok: true });
+      });
 
       const res = createRes();
       await handler(
@@ -321,19 +239,30 @@ describe('keep-alive handler', () => {
     });
 
     it('does not re-alert on the same ongoing failure', async () => {
-      // First run: Moss fails
-      mockLookup.mockRejectedValue(new Error('Moss ET down'));
-      mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
+      // Make Turnstile fail
+      mockFetch.mockImplementation((url) => {
+        if (url.includes('turnstile')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ success: false, 'error-codes': ['invalid-input-secret'] }),
+          });
+        }
+        if (url.includes('hsforms')) {
+          return Promise.resolve({ status: 400, ok: false });
+        }
+        return Promise.resolve({ ok: true });
+      });
 
+      // First run: Turnstile fails
       const res1 = createRes();
       await handler(
         createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
         res1
       );
       expect(mockSendAlert).toHaveBeenCalledTimes(1);
-      expect(res1._json.transitions.newFailures).toContain('moss');
+      expect(res1._json.transitions.newFailures).toContain('turnstile');
 
-      // Second run: Moss still failing — no new alert
+      // Second run: Turnstile still failing — no new alert
       const res2 = createRes();
       await handler(
         createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
@@ -341,13 +270,23 @@ describe('keep-alive handler', () => {
       );
       expect(mockSendAlert).toHaveBeenCalledTimes(1); // Still just one
       expect(res2._json.transitions.newFailures).toEqual([]);
-      expect(res2._json.transitions.ongoing).toContain('moss');
+      expect(res2._json.transitions.ongoing).toContain('turnstile');
     });
 
     it('sends recovery alert when a previously-failing service comes back up', async () => {
-      // Run 1: Moss fails
-      mockLookup.mockRejectedValueOnce(new Error('Moss ET down'));
-      mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
+      // Run 1: Turnstile fails
+      mockFetch.mockImplementationOnce((url) => {
+        if (url.includes('turnstile')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ success: false, 'error-codes': ['invalid-input-secret'] }),
+          });
+        }
+        return Promise.resolve({ status: 400, ok: false });
+      }).mockImplementationOnce((url) => {
+        // HubSpot on first run
+        return Promise.resolve({ status: 400, ok: false });
+      });
 
       const res1 = createRes();
       await handler(
@@ -357,8 +296,8 @@ describe('keep-alive handler', () => {
       expect(mockSendAlert).toHaveBeenCalledTimes(1);
       expect(mockSendAlert.mock.calls[0][0]).toContain('1 service(s) down');
 
-      // Run 2: Moss recovered
-      mockLookup.mockResolvedValueOnce('https://calendly.com/alpha');
+      // Run 2: Turnstile recovered
+      setupHealthyFetch();
 
       const res2 = createRes();
       await handler(
@@ -367,14 +306,24 @@ describe('keep-alive handler', () => {
       );
       expect(mockSendAlert).toHaveBeenCalledTimes(2);
       expect(mockSendAlert.mock.calls[1][0]).toContain('1 service(s) recovered');
-      expect(mockSendAlert.mock.calls[1][1]).toContain('EasyTerritory (Moss) recovered');
-      expect(res2._json.transitions.recoveries).toContain('moss');
+      expect(mockSendAlert.mock.calls[1][1]).toContain('Cloudflare Turnstile recovered');
+      expect(res2._json.transitions.recoveries).toContain('turnstile');
     });
 
     it('only alerts on newly-failed services (not ongoing)', async () => {
-      // Run 1: Moss fails
-      mockLookup.mockRejectedValueOnce(new Error('Moss ET down'));
-      mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
+      // Run 1: Turnstile fails
+      mockFetch.mockImplementation((url) => {
+        if (url.includes('turnstile')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ success: false, 'error-codes': ['invalid-input-secret'] }),
+          });
+        }
+        if (url.includes('hsforms')) {
+          return Promise.resolve({ status: 400, ok: false });
+        }
+        return Promise.resolve({ ok: true });
+      });
 
       const res1 = createRes();
       await handler(
@@ -383,26 +332,46 @@ describe('keep-alive handler', () => {
       );
       expect(mockSendAlert).toHaveBeenCalledTimes(1);
 
-      // Run 2: Moss still failing AND now Renolution fails
-      mockLookup.mockRejectedValueOnce(new Error('Moss ET down'));
-      mockRenolutionLookup.mockRejectedValueOnce(new Error('Renolution down'));
+      // Run 2: Turnstile still failing AND now HubSpot fails too
+      mockFetch.mockImplementation((url) => {
+        if (url.includes('turnstile')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ success: false, 'error-codes': ['invalid-input-secret'] }),
+          });
+        }
+        if (url.includes('hsforms')) {
+          return Promise.resolve({ status: 500, ok: false });
+        }
+        return Promise.resolve({ ok: true });
+      });
 
       const res2 = createRes();
       await handler(
         createReq({ headers: { authorization: 'Bearer test-cron-secret' } }),
         res2
       );
-      // Second alert should only mention Renolution as new
+      // Second alert should only mention HubSpot as new
       expect(mockSendAlert).toHaveBeenCalledTimes(2);
       expect(mockSendAlert.mock.calls[1][0]).toContain('1 service(s) down');
-      expect(mockSendAlert.mock.calls[1][1]).toContain('EasyTerritory (Renolution)');
-      expect(mockSendAlert.mock.calls[1][1]).not.toContain('Moss');
+      expect(mockSendAlert.mock.calls[1][1]).toContain('HubSpot Forms API');
+      expect(mockSendAlert.mock.calls[1][1]).not.toContain('Turnstile');
     });
 
     it('clears Redis state when all services recover', async () => {
-      // Run 1: Moss fails
-      mockLookup.mockRejectedValueOnce(new Error('Moss ET down'));
-      mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
+      // Run 1: Turnstile fails
+      mockFetch.mockImplementation((url) => {
+        if (url.includes('turnstile')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ success: false, 'error-codes': ['invalid-input-secret'] }),
+          });
+        }
+        if (url.includes('hsforms')) {
+          return Promise.resolve({ status: 400, ok: false });
+        }
+        return Promise.resolve({ ok: true });
+      });
 
       const res1 = createRes();
       await handler(
@@ -412,7 +381,7 @@ describe('keep-alive handler', () => {
       expect(redisStore['keepalive:failures']).toBeDefined();
 
       // Run 2: All healthy
-      mockLookup.mockResolvedValueOnce('https://calendly.com/alpha');
+      setupHealthyFetch();
 
       const res2 = createRes();
       await handler(
@@ -428,11 +397,21 @@ describe('keep-alive handler', () => {
       delete process.env.UPSTASH_REDIS_REST_URL;
       delete process.env.UPSTASH_REDIS_REST_TOKEN;
       vi.resetModules();
-      setupHealthyFetch();
-      const mod = await import('../../api/keep-alive.js');
 
-      mockLookup.mockRejectedValue(new Error('Moss ET down'));
-      mockRenolutionLookup.mockResolvedValue('https://calendly.com/renolution');
+      mockFetch.mockImplementation((url) => {
+        if (url.includes('turnstile')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ success: false, 'error-codes': ['invalid-input-secret'] }),
+          });
+        }
+        if (url.includes('hsforms')) {
+          return Promise.resolve({ status: 400, ok: false });
+        }
+        return Promise.resolve({ ok: true });
+      });
+
+      const mod = await import('../../api/keep-alive.js');
 
       const res = createRes();
       await mod.default(
