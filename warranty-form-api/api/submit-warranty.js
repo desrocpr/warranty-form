@@ -27,6 +27,28 @@ const CONTACT_TO_TICKET_ASSOCIATION_TYPE_ID = 16; // HubSpot default: contact_to
 
 const HIGH_PRIORITY_CATEGORIES = new Set(['Structural', 'Electrical']);
 
+// Free-text length caps — keep payloads small enough that HubSpot will accept
+// them (HubSpot ticket properties top out well above these) and to short-circuit
+// obvious abuse before any outbound API call. See PR comment MEDIUM-1 on PR #2.
+const MAX_LENGTHS = {
+  name: 200,
+  email: 254, // RFC 5321 SMTP address limit
+  phone: 50,
+  originalAddress: 500,
+  issueCategory: 100,
+  issueDescription: 5000,
+};
+
+// Permissive email regex — full RFC 5322 is impractical; this catches the
+// common shape errors (no @, no domain, whitespace) without over-rejecting.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Truncate HubSpot error response bodies before logging or echoing in thrown
+// errors — HubSpot occasionally echoes property values (and, on misconfigured
+// requests, request headers) back in error messages; capping length limits
+// accidental PII / token leakage in Vercel logs. See PR comment MEDIUM-3.
+const ERROR_BODY_PREVIEW_LIMIT = 200;
+
 const REQUIRED_FIELDS = [
   'name',
   'email',
@@ -42,6 +64,24 @@ function hasValue(v) {
   if (v === undefined || v === null) return false;
   if (typeof v === 'string' && v.trim() === '') return false;
   return true;
+}
+
+function truncate(str, max) {
+  const s = typeof str === 'string' ? str : String(str ?? '');
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}…[truncated]`;
+}
+
+function isValidCompletionYear(v) {
+  // Allow integer numbers or numeric strings; reject decimals, NaN, and
+  // values outside a plausible "year built" window.
+  if (v === null || v === undefined || v === '') return false;
+  if (typeof v === 'number' && !Number.isFinite(v)) return false;
+  if (typeof v === 'string' && !/^-?\d+$/.test(v.trim())) return false;
+  const n = Number(v);
+  if (!Number.isInteger(n)) return false;
+  const currentYear = new Date().getUTCFullYear();
+  return n >= 1900 && n <= currentYear + 1;
 }
 
 function splitName(name) {
@@ -90,7 +130,12 @@ async function findContactByEmail(email, accessToken) {
   });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => 'unknown');
-    throw new Error(`HubSpot contact search failed: ${resp.status} ${txt}`);
+    console.error(
+      '[SubmitWarranty] HubSpot contact search failed:',
+      resp.status,
+      truncate(txt, ERROR_BODY_PREVIEW_LIMIT)
+    );
+    throw new Error(`HubSpot contact search failed: ${resp.status}`);
   }
   const data = await resp.json();
   if (data.results && data.results.length > 0) {
@@ -118,7 +163,12 @@ async function createContact({ name, email, phone }, accessToken) {
   });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => 'unknown');
-    throw new Error(`HubSpot contact create failed: ${resp.status} ${txt}`);
+    console.error(
+      '[SubmitWarranty] HubSpot contact create failed:',
+      resp.status,
+      truncate(txt, ERROR_BODY_PREVIEW_LIMIT)
+    );
+    throw new Error(`HubSpot contact create failed: ${resp.status}`);
   }
   const data = await resp.json();
   return data.id;
@@ -174,7 +224,12 @@ async function createTicket(
   });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => 'unknown');
-    throw new Error(`HubSpot ticket create failed: ${resp.status} ${txt}`);
+    console.error(
+      '[SubmitWarranty] HubSpot ticket create failed:',
+      resp.status,
+      truncate(txt, ERROR_BODY_PREVIEW_LIMIT)
+    );
+    throw new Error(`HubSpot ticket create failed: ${resp.status}`);
   }
   const data = await resp.json();
   return data.id;
@@ -207,6 +262,28 @@ export default async function handler(req, res) {
     if (!hasValue(body[field])) {
       return res.status(400).json({ error: `Missing required field: ${field}` });
     }
+  }
+
+  // Length caps on free-text fields — short-circuit obviously oversize input
+  // before any outbound API call. See PR comment MEDIUM-1.
+  for (const [field, max] of Object.entries(MAX_LENGTHS)) {
+    const val = body[field];
+    if (typeof val === 'string' && val.length > max) {
+      return res
+        .status(400)
+        .json({ error: `Field ${field} exceeds maximum length of ${max} characters` });
+    }
+  }
+
+  // Email format check — reject malformed addresses up front rather than
+  // forwarding to HubSpot.
+  if (!EMAIL_REGEX.test(String(email).trim())) {
+    return res.status(400).json({ error: 'Invalid email address' });
+  }
+
+  // completionYear: integer in plausible range (1900 .. currentYear + 1).
+  if (!isValidCompletionYear(completionYear)) {
+    return res.status(400).json({ error: 'Invalid completionYear' });
   }
 
   // Verify Turnstile

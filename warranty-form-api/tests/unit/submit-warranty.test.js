@@ -462,4 +462,176 @@ describe('submit-warranty handler', () => {
     expect(res._status).toBe(200);
     expect(res._json.bookingUrl).toBeNull();
   });
+
+  // -------------------------------------------------------------------------
+  // Input validation (PR-2 review: length caps, email format, year range)
+  // -------------------------------------------------------------------------
+
+  it('rejects issueDescription longer than 5000 chars with 400', async () => {
+    setupHappyPath();
+    const res = createRes();
+    await handler(
+      createReq({ body: validPayload({ issueDescription: 'a'.repeat(5001) }) }),
+      res
+    );
+    expect(res._status).toBe(400);
+    expect(res._json.error).toMatch(/issueDescription/);
+    expect(res._json.error).toMatch(/5000/);
+  });
+
+  it('rejects name longer than 200 chars with 400', async () => {
+    setupHappyPath();
+    const res = createRes();
+    await handler(createReq({ body: validPayload({ name: 'A'.repeat(201) }) }), res);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toMatch(/name/);
+  });
+
+  it('rejects originalAddress longer than 500 chars with 400', async () => {
+    setupHappyPath();
+    const res = createRes();
+    await handler(
+      createReq({ body: validPayload({ originalAddress: 'x'.repeat(501) }) }),
+      res
+    );
+    expect(res._status).toBe(400);
+    expect(res._json.error).toMatch(/originalAddress/);
+  });
+
+  it('accepts free-text fields at the maximum allowed length', async () => {
+    setupHappyPath();
+    const res = createRes();
+    await handler(
+      createReq({
+        body: validPayload({
+          name: 'A'.repeat(200),
+          issueDescription: 'b'.repeat(5000),
+        }),
+      }),
+      res
+    );
+    expect(res._status).toBe(200);
+  });
+
+  it.each([
+    'not-an-email',
+    'missing-at-sign.com',
+    'no-domain@',
+    '@no-local.com',
+    'has spaces@example.com',
+    'two@@signs.com',
+  ])('rejects malformed email %s with 400', async (email) => {
+    setupHappyPath();
+    const res = createRes();
+    await handler(createReq({ body: validPayload({ email }) }), res);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toMatch(/email/i);
+  });
+
+  it.each([
+    'not-a-year',
+    1899,
+    '1899',
+    1.5,
+    '1990.5',
+    NaN,
+  ])('rejects invalid completionYear %p with 400', async (completionYear) => {
+    setupHappyPath();
+    const res = createRes();
+    await handler(createReq({ body: validPayload({ completionYear }) }), res);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toMatch(/completionYear/);
+  });
+
+  it('rejects completionYear far in the future with 400', async () => {
+    setupHappyPath();
+    const res = createRes();
+    const future = new Date().getUTCFullYear() + 50;
+    await handler(createReq({ body: validPayload({ completionYear: future }) }), res);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toMatch(/completionYear/);
+  });
+
+  it('accepts completionYear as numeric string', async () => {
+    setupHappyPath();
+    const res = createRes();
+    await handler(createReq({ body: validPayload({ completionYear: '2020' }) }), res);
+    expect(res._status).toBe(200);
+
+    const ticketCall = mockFetch.mock.calls.find(
+      ([url]) => typeof url === 'string' && url.endsWith('/crm/v3/objects/tickets')
+    );
+    const ticketBody = JSON.parse(ticketCall[1].body);
+    expect(ticketBody.properties.completion_year).toBe('2020');
+  });
+
+  // -------------------------------------------------------------------------
+  // HubSpot error logging sanitization (PR-2 review MEDIUM-3)
+  // -------------------------------------------------------------------------
+
+  it('does not include raw HubSpot error body in the thrown Error message', async () => {
+    // The Error message propagated to console.error must NOT echo the raw
+    // HubSpot response body — that body sometimes contains property values or
+    // header names we don't want pasted into Vercel logs verbatim.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sensitive = 'AUTH_TOKEN_LEAK_xxxxxxxxxxxxxxxxxxxxxxxx';
+
+    mockFetch.mockImplementation((url) => {
+      if (typeof url === 'string') {
+        if (url.includes('turnstile')) return turnstileOkResponse();
+        if (url.includes('/crm/v3/objects/contacts/search')) return contactSearchHit();
+        if (url.includes('/crm/v3/objects/tickets')) {
+          return hubspotErrorResponse(400, sensitive);
+        }
+      }
+      return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+    });
+
+    const res = createRes();
+    await handler(createReq({ body: validPayload() }), res);
+    expect(res._status).toBe(500);
+
+    // Inspect the err object passed to console.error in the handler's catch.
+    // The Error.message itself should not contain the raw body — only status.
+    const handlerCall = errorSpy.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('HubSpot API error')
+    );
+    expect(handlerCall).toBeTruthy();
+    const errObj = handlerCall[1];
+    expect(errObj).toBeInstanceOf(Error);
+    expect(errObj.message).not.toContain(sensitive);
+    expect(errObj.message).toMatch(/400/);
+    errorSpy.mockRestore();
+  });
+
+  it('truncates HubSpot error response bodies before logging', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const huge = 'X'.repeat(5000);
+
+    mockFetch.mockImplementation((url) => {
+      if (typeof url === 'string') {
+        if (url.includes('turnstile')) return turnstileOkResponse();
+        if (url.includes('/crm/v3/objects/contacts/search')) return contactSearchHit();
+        if (url.includes('/crm/v3/objects/tickets')) return hubspotErrorResponse(500, huge);
+      }
+      return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+    });
+
+    const res = createRes();
+    await handler(createReq({ body: validPayload() }), res);
+    expect(res._status).toBe(500);
+
+    // The dedicated ticket-create error log line is `[SubmitWarranty] HubSpot
+    // ticket create failed:` followed by status + truncated body.
+    const ticketLogCall = errorSpy.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('HubSpot ticket create failed')
+    );
+    expect(ticketLogCall).toBeTruthy();
+    const truncatedBody = ticketLogCall[2];
+    expect(typeof truncatedBody).toBe('string');
+    // Should be well under the original 5000 char input.
+    expect(truncatedBody.length).toBeLessThan(huge.length);
+    expect(truncatedBody).toMatch(/truncated/);
+    errorSpy.mockRestore();
+  });
 });
