@@ -19,6 +19,14 @@
   box-sizing: border-box;
 }
 
+/*
+ * .moss-warranty-form-container is applied alongside .moss-contact-form-container
+ * in module.html as an intentional CSS hook for warranty-specific overrides.
+ * No rules are defined yet — the container currently inherits the base styles
+ * above. Add warranty-only overrides here when divergence from the contact-form
+ * layout/palette is required.
+ */
+
 /* Header */
 .contact-form-header {
   text-align: center;
