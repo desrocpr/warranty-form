@@ -514,6 +514,15 @@
   // user picks them, so the main form submit (MOS-204) stays fast and only
   // carries a list of URLs rather than file blobs.
   //
+  // Security:
+  //   Each upload includes the current Cloudflare Turnstile token — the
+  //   server verifies it before storing anything. Turnstile tokens are
+  //   single-use (Cloudflare consumes them on verification), so after every
+  //   upload we call `turnstile.reset()` to get a fresh token for the next
+  //   upload (and for the eventual form submit). Uploads are serialised
+  //   through a single promise queue so two parallel uploads never race for
+  //   the same token.
+  //
   // This module is intentionally defensive: if the warranty form HTML
   // (`#cf-photo-input` — added by MOS-203) is not in the DOM, the function
   // no-ops. The hidden `#cf-photo-urls` field is created lazily here so
@@ -524,6 +533,12 @@
   // warranty-form-api/api/upload-photo.js
   var ALLOWED_PHOTO_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
   var MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+  // How long we'll wait for a Turnstile token to become available before
+  // giving up on an upload. Turnstile.reset() typically refreshes within a
+  // second; this bounds the worst case so the UI never hangs forever.
+  var TURNSTILE_TOKEN_WAIT_MS = 8000;
+  var TURNSTILE_POLL_INTERVAL_MS = 100;
 
   function getUploadEndpointUrl() {
     var config = getConfig();
@@ -560,6 +575,36 @@
     return container;
   }
 
+  // Wait briefly for Turnstile to have a token available. Resolves with the
+  // token string, or '' if Turnstile is unavailable / failed / timed out.
+  function waitForTurnstileToken() {
+    return new Promise(function(resolve) {
+      if (turnstileFailed || turnstileWidgetId === null || typeof turnstile === 'undefined') {
+        resolve('');
+        return;
+      }
+      var existing = turnstile.getResponse(turnstileWidgetId);
+      if (existing) {
+        resolve(existing);
+        return;
+      }
+      var elapsed = 0;
+      var poll = setInterval(function() {
+        elapsed += TURNSTILE_POLL_INTERVAL_MS;
+        var t = (turnstileWidgetId !== null && typeof turnstile !== 'undefined')
+          ? turnstile.getResponse(turnstileWidgetId)
+          : '';
+        if (t) {
+          clearInterval(poll);
+          resolve(t);
+        } else if (elapsed >= TURNSTILE_TOKEN_WAIT_MS) {
+          clearInterval(poll);
+          resolve('');
+        }
+      }, TURNSTILE_POLL_INTERVAL_MS);
+    });
+  }
+
   function setupPhotoUpload() {
     var input = document.getElementById('cf-photo-input');
     if (!input) return; // MOS-203 owns the HTML — if it's absent, no-op.
@@ -572,6 +617,11 @@
 
     // Active list of uploaded URLs (kept in lockstep with hiddenField.value)
     var uploadedUrls = [];
+
+    // Single promise chain — uploads run one at a time so that the
+    // Turnstile token used by upload N+1 has had a chance to refresh
+    // after upload N consumed the previous one.
+    var uploadQueue = Promise.resolve();
 
     function commitUrls() {
       hiddenField.value = JSON.stringify(uploadedUrls);
@@ -588,7 +638,7 @@
 
       var status = document.createElement('span');
       status.className = 'cf-photo-status';
-      status.textContent = 'Uploading…';
+      status.textContent = 'Waiting…';
       li.appendChild(status);
 
       var retryBtn = document.createElement('button');
@@ -608,45 +658,70 @@
       if (ALLOWED_PHOTO_MIME_TYPES.indexOf(file.type) === -1) {
         row.status.textContent = 'Unsupported file type (jpg, png, webp only)';
         row.retryBtn.style.display = 'none';
-        return;
+        return Promise.resolve();
       }
       if (file.size > MAX_PHOTO_BYTES) {
         row.status.textContent = 'File too large (max 5 MB)';
         row.retryBtn.style.display = 'none';
-        return;
+        return Promise.resolve();
       }
 
       row.status.textContent = 'Uploading…';
       row.retryBtn.style.display = 'none';
 
-      var formData = new FormData();
-      formData.append('photo', file, file.name);
-
-      fetch(endpointUrl, {
-        method: 'POST',
-        body: formData
-      })
-        .then(function(resp) {
-          return resp.json().then(function(data) {
-            return { ok: resp.ok, status: resp.status, data: data };
-          });
-        })
-        .then(function(result) {
-          if (result.ok && result.data && result.data.url) {
-            uploadedUrls.push(result.data.url);
-            commitUrls();
-            row.status.textContent = 'Uploaded ✓';
-          } else {
-            var msg = (result.data && result.data.error) || ('Upload failed (' + result.status + ')');
-            row.status.textContent = msg;
-            row.retryBtn.style.display = '';
-          }
-        })
-        .catch(function(err) {
-          row.status.textContent = 'Upload failed — check your connection';
+      return waitForTurnstileToken().then(function(token) {
+        if (!token) {
+          row.status.textContent = 'Security check unavailable — please refresh and try again';
           row.retryBtn.style.display = '';
-          reportClientError('photo_upload_error', (err && err.message) || 'Upload fetch failed');
-        });
+          return;
+        }
+
+        var formData = new FormData();
+        formData.append('photo', file, file.name);
+        formData.append('turnstile_token', token);
+
+        return fetch(endpointUrl, {
+          method: 'POST',
+          body: formData
+        })
+          .then(function(resp) {
+            return resp.json().then(function(data) {
+              return { ok: resp.ok, status: resp.status, data: data };
+            });
+          })
+          .then(function(result) {
+            if (result.ok && result.data && result.data.url) {
+              uploadedUrls.push(result.data.url);
+              commitUrls();
+              row.status.textContent = 'Uploaded ✓';
+            } else {
+              var msg = (result.data && result.data.error) || ('Upload failed (' + result.status + ')');
+              row.status.textContent = msg;
+              row.retryBtn.style.display = '';
+            }
+          })
+          .catch(function(err) {
+            row.status.textContent = 'Upload failed — check your connection';
+            row.retryBtn.style.display = '';
+            reportClientError('photo_upload_error', (err && err.message) || 'Upload fetch failed');
+          })
+          .then(function() {
+            // Whether the upload succeeded or failed, the Turnstile token
+            // we sent is now spent (Cloudflare consumes tokens on verify).
+            // Reset the widget so the next upload — and the eventual form
+            // submit — has a fresh token.
+            if (turnstileWidgetId !== null && typeof turnstile !== 'undefined') {
+              try { turnstile.reset(turnstileWidgetId); } catch (e) { /* ignore */ }
+            }
+          });
+      });
+    }
+
+    function enqueue(file, row) {
+      uploadQueue = uploadQueue.then(function() {
+        return uploadOne(file, row);
+      });
+      return uploadQueue;
     }
 
     input.addEventListener('change', function(e) {
@@ -655,9 +730,9 @@
         (function(file) {
           var row = makeRow(file);
           row.retryBtn.addEventListener('click', function() {
-            uploadOne(file, row);
+            enqueue(file, row);
           });
-          uploadOne(file, row);
+          enqueue(file, row);
         })(files[i]);
       }
       // Reset value so re-selecting the same file re-fires `change`.

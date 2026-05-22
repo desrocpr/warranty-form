@@ -8,9 +8,20 @@
  *
  * POST /api/upload-photo
  *   Content-Type: multipart/form-data; boundary=...
- *   Body: a single file field (any name)
+ *   Body fields:
+ *     - <file>            the photo (any field name with a filename)
+ *     - turnstile_token   Cloudflare Turnstile token (REQUIRED)
  *
  * Response: { url: "https://blob.vercel-storage.com/warranty/<random>-<filename>" }
+ *
+ * Security:
+ *   - Cloudflare Turnstile token is verified against the
+ *     `TURNSTILE_SECRET_KEY` server-side secret BEFORE any blob upload.
+ *     Without a valid token the request is rejected with 403, which
+ *     prevents anonymous scripts from filling Vercel Blob storage.
+ *   - EXIF metadata (including GPS coordinates) is stripped from every
+ *     image using `sharp(...).rotate()` before storage. `.rotate()` applies
+ *     EXIF orientation and then drops all metadata.
  *
  * Validation:
  *   - Allowed MIME types: image/jpeg, image/png, image/webp
@@ -21,18 +32,20 @@
  *
  * Environment:
  *   - BLOB_READ_WRITE_TOKEN — passed through to @vercel/blob's `put()`
+ *   - TURNSTILE_SECRET_KEY  — used to verify the Turnstile token
  */
 
 import { Buffer } from 'node:buffer';
 import { randomBytes } from 'node:crypto';
 import { put } from '@vercel/blob';
+import sharp from 'sharp';
 
 // 5 MB
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 // A modest cushion above MAX_FILE_SIZE to allow for the multipart envelope
-// (headers + boundaries) while still rejecting obviously oversized payloads
-// before parsing them. Keeps the parser bounded.
+// (headers + boundaries + the turnstile_token field) while still rejecting
+// obviously oversized payloads before parsing them. Keeps the parser bounded.
 const MAX_BODY_SIZE = MAX_FILE_SIZE + 32 * 1024;
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -41,6 +54,8 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/png',
   'image/webp',
 ]);
+
+const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
 // Disable Vercel's default body parser so we receive the raw multipart payload.
 export const config = {
@@ -96,24 +111,24 @@ function parseBoundary(contentTypeHeader) {
 }
 
 /**
- * Minimal multipart/form-data parser that returns the FIRST file part it
- * finds (filename + content-type + data). We only ever upload one file per
- * request — additional parts are ignored.
+ * Walk a multipart/form-data body and return all parts.
  *
- * Returns null if no file part is found / the body is malformed.
+ * Each part is { name, filename, contentType, data }. `filename` is null for
+ * plain form fields, which lets the handler distinguish the file from the
+ * `turnstile_token` field. Returns [] if the body is malformed.
  */
-function parseFirstFilePart(body, boundary) {
+function parseMultipartParts(body, boundary) {
+  const parts = [];
   const delimiter = Buffer.from(`--${boundary}`);
-  const CRLF = Buffer.from('\r\n');
 
   let cursor = body.indexOf(delimiter);
-  if (cursor === -1) return null;
+  if (cursor === -1) return parts;
 
   while (cursor !== -1 && cursor < body.length) {
     cursor += delimiter.length;
     // Closing boundary: "--BOUNDARY--"
     if (body[cursor] === 0x2d && body[cursor + 1] === 0x2d) {
-      return null;
+      break;
     }
     // Skip CRLF after the boundary line
     if (body[cursor] === 0x0d && body[cursor + 1] === 0x0a) {
@@ -121,14 +136,14 @@ function parseFirstFilePart(body, boundary) {
     }
 
     const headersEnd = body.indexOf(Buffer.from('\r\n\r\n'), cursor);
-    if (headersEnd === -1) return null;
+    if (headersEnd === -1) break;
 
     const headersStr = body.slice(cursor, headersEnd).toString('utf8');
     const dataStart = headersEnd + 4;
 
     // Find next boundary to know where this part ends.
     const nextBoundary = body.indexOf(delimiter, dataStart);
-    if (nextBoundary === -1) return null;
+    if (nextBoundary === -1) break;
 
     // Trim the trailing CRLF that precedes the boundary.
     let dataEnd = nextBoundary;
@@ -140,37 +155,34 @@ function parseFirstFilePart(body, boundary) {
       dataEnd -= 2;
     }
 
+    let name = null;
     let filename = null;
     let partContentType = null;
     for (const rawLine of headersStr.split('\r\n')) {
       const colonIdx = rawLine.indexOf(':');
       if (colonIdx === -1) continue;
-      const name = rawLine.slice(0, colonIdx).trim().toLowerCase();
+      const headerName = rawLine.slice(0, colonIdx).trim().toLowerCase();
       const value = rawLine.slice(colonIdx + 1).trim();
-      if (name === 'content-disposition') {
-        const m = value.match(/filename="((?:[^"\\]|\\.)*)"/i);
-        if (m) {
-          // Unescape any backslash-escaped quotes
-          filename = m[1].replace(/\\(.)/g, '$1');
-        }
-      } else if (name === 'content-type') {
+      if (headerName === 'content-disposition') {
+        const nameMatch = value.match(/name="((?:[^"\\]|\\.)*)"/i);
+        if (nameMatch) name = nameMatch[1].replace(/\\(.)/g, '$1');
+        const fnMatch = value.match(/filename="((?:[^"\\]|\\.)*)"/i);
+        if (fnMatch) filename = fnMatch[1].replace(/\\(.)/g, '$1');
+      } else if (headerName === 'content-type') {
         partContentType = value.toLowerCase();
       }
     }
 
-    if (filename !== null) {
-      return {
-        filename,
-        contentType: partContentType || 'application/octet-stream',
-        data: body.slice(dataStart, dataEnd),
-      };
-    }
+    parts.push({
+      name,
+      filename,
+      contentType: partContentType,
+      data: body.slice(dataStart, dataEnd),
+    });
 
     cursor = nextBoundary;
-    // CRLF intentionally not consumed here — the next iteration will.
-    void CRLF;
   }
-  return null;
+  return parts;
 }
 
 /**
@@ -197,6 +209,62 @@ function sanitizeFilename(rawName) {
   return name;
 }
 
+/**
+ * Verify the Cloudflare Turnstile token with Cloudflare's siteverify API.
+ * Matches the JSON-POST pattern used elsewhere in this codebase. Returns
+ * `true` only on an explicit `{ success: true }` response. Any timeout,
+ * network error, or non-2xx is treated as failure (fail-closed).
+ */
+async function verifyTurnstile(token, secret) {
+  if (!token || !secret) return false;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const resp = await fetch(TURNSTILE_VERIFY_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret, response: token }),
+    });
+    if (!resp.ok) return false;
+    const data = await resp.json().catch(() => ({}));
+    return !!data.success;
+  } catch (err) {
+    console.error('[UploadPhoto] Turnstile verification error:', err && err.message);
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Strip EXIF (including GPS) and other metadata from the uploaded image.
+ *
+ * `sharp(buffer).rotate()` applies the EXIF Orientation tag and then drops
+ * all metadata in the output. The image is re-encoded in its original
+ * format to preserve the user's chosen MIME type.
+ *
+ * On any sharp failure we fall through and re-throw so the handler can
+ * return a 502 — uploading the raw (still-EXIF-laden) buffer would defeat
+ * the privacy guarantee.
+ */
+async function stripImageMetadata(buffer, mime) {
+  const pipeline = sharp(buffer).rotate();
+  switch (mime) {
+    case 'image/jpeg':
+    case 'image/jpg':
+      return pipeline.jpeg().toBuffer();
+    case 'image/png':
+      return pipeline.png().toBuffer();
+    case 'image/webp':
+      return pipeline.webp().toBuffer();
+    default:
+      // Should not be reachable — MIME is already allow-list checked.
+      return pipeline.toBuffer();
+  }
+}
+
 export default async function handler(req, res) {
   // CORS handled by vercel.json
   if (req.method === 'OPTIONS') {
@@ -207,9 +275,15 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!blobToken) {
     console.error('[UploadPhoto] BLOB_READ_WRITE_TOKEN not configured');
+    return res.status(500).json({ error: 'Upload service not configured' });
+  }
+
+  const turnstileSecret = process.env.TURNSTILE_SECRET_KEY;
+  if (!turnstileSecret) {
+    console.error('[UploadPhoto] TURNSTILE_SECRET_KEY not configured');
     return res.status(500).json({ error: 'Upload service not configured' });
   }
 
@@ -230,31 +304,68 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Could not read request body' });
   }
 
-  const part = parseFirstFilePart(body, boundary);
-  if (!part || !part.data || part.data.length === 0) {
+  const parts = parseMultipartParts(body, boundary);
+
+  // Pick the first part with a filename as the uploaded photo; collect
+  // plain form fields (the Turnstile token in particular) by name.
+  let filePart = null;
+  const fields = Object.create(null);
+  for (const part of parts) {
+    if (part.filename != null) {
+      if (filePart === null) filePart = part;
+    } else if (part.name != null) {
+      fields[part.name] = part.data.toString('utf8');
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Turnstile verification — runs BEFORE any blob storage interaction.
+  // Without this, the endpoint is publicly callable and a trivial script can
+  // fill Vercel Blob storage in minutes. See PR review on MOS-205.
+  // -------------------------------------------------------------------------
+  const turnstileToken = (fields.turnstile_token || '').trim();
+  if (!turnstileToken) {
+    return res.status(403).json({ error: 'Security verification is required' });
+  }
+  const turnstileOk = await verifyTurnstile(turnstileToken, turnstileSecret);
+  if (!turnstileOk) {
+    return res.status(403).json({ error: 'Security verification failed' });
+  }
+
+  if (!filePart || !filePart.data || filePart.data.length === 0) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
 
-  if (part.data.length > MAX_FILE_SIZE) {
+  if (filePart.data.length > MAX_FILE_SIZE) {
     return res.status(413).json({ error: 'File too large (max 5 MB)' });
   }
 
-  const mime = (part.contentType || '').split(';')[0].trim().toLowerCase();
+  const mime = (filePart.contentType || '').split(';')[0].trim().toLowerCase();
   if (!ALLOWED_MIME_TYPES.has(mime)) {
     return res.status(415).json({ error: 'Unsupported file type (allowed: jpeg, png, webp)' });
   }
 
-  const safeName = sanitizeFilename(part.filename);
+  // Strip EXIF metadata (including GPS) before persisting. Customer photos
+  // commonly carry location data — we never want that uploaded.
+  let cleanedBuffer;
+  try {
+    cleanedBuffer = await stripImageMetadata(filePart.data, mime);
+  } catch (err) {
+    console.error('[UploadPhoto] Failed to strip image metadata:', err && err.message);
+    return res.status(415).json({ error: 'Could not process image (file may be corrupted)' });
+  }
+
+  const safeName = sanitizeFilename(filePart.filename);
   const randomPrefix = randomBytes(8).toString('hex');
   const pathname = `warranty/${randomPrefix}-${safeName}`;
 
   try {
-    const result = await put(pathname, part.data, {
+    const result = await put(pathname, cleanedBuffer, {
       access: 'public',
       contentType: mime,
       // We already prepend our own random prefix, so disable the SDK's suffix.
       addRandomSuffix: false,
-      token,
+      token: blobToken,
     });
     return res.status(200).json({ url: result.url });
   } catch (err) {

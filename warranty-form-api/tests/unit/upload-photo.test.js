@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Buffer } from 'node:buffer';
 
 // ---------------------------------------------------------------------------
@@ -10,32 +10,63 @@ vi.mock('@vercel/blob', () => ({
   put: (...args) => mockPut(...args),
 }));
 
+// Mock `sharp` to act as an identity transform — it returns the input
+// buffer unchanged so the rest of the pipeline keeps working. The handler's
+// only contract with sharp is "we ran something through it that strips
+// EXIF"; we assert the integration by checking that the chain was called
+// at least once per upload.
+const mockSharpToBuffer = vi.fn();
+const mockSharpCtor = vi.fn();
+vi.mock('sharp', () => ({
+  default: (...args) => mockSharpCtor(...args),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const TEST_TOKEN = 'vercel_blob_rw_test_token_abc';
+const TEST_BLOB_TOKEN = 'vercel_blob_rw_test_token_abc';
+const TEST_TURNSTILE_SECRET = 'turnstile_test_secret';
+const TEST_TURNSTILE_TOKEN = 'turnstile_response_test_token';
 const BOUNDARY = '----WebKitFormBoundaryTEST';
 
 /**
- * Build a Buffer representing a multipart/form-data body containing a single
- * file part. Mirrors what a browser FormData submission would produce.
+ * Build a Buffer representing a multipart/form-data body. By default it
+ * carries one file part AND a turnstile_token field — mirroring what the
+ * browser FormData submission produces after MOS-205's client-side
+ * Turnstile wiring.
  */
 function buildMultipartBody({
   fieldName = 'photo',
   filename = 'photo.jpg',
   contentType = 'image/jpeg',
   data = Buffer.from('fake-jpg-bytes'),
+  turnstileToken = TEST_TURNSTILE_TOKEN,
+  includeTurnstileField = true,
 } = {}) {
   const fileData = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  const head = Buffer.from(
+
+  const fileHead = Buffer.from(
     `--${BOUNDARY}\r\n` +
       `Content-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r\n` +
       `Content-Type: ${contentType}\r\n\r\n`,
     'utf8'
   );
-  const tail = Buffer.from(`\r\n--${BOUNDARY}--\r\n`, 'utf8');
-  return Buffer.concat([head, fileData, tail]);
+
+  const segments = [fileHead, fileData];
+
+  if (includeTurnstileField) {
+    const tokenPart = Buffer.from(
+      `\r\n--${BOUNDARY}\r\n` +
+        `Content-Disposition: form-data; name="turnstile_token"\r\n\r\n` +
+        `${turnstileToken}`,
+      'utf8'
+    );
+    segments.push(tokenPart);
+  }
+
+  segments.push(Buffer.from(`\r\n--${BOUNDARY}--\r\n`, 'utf8'));
+  return Buffer.concat(segments);
 }
 
 function createReq({
@@ -63,12 +94,32 @@ function createRes() {
   return res;
 }
 
+/**
+ * Install a `fetch` stub that intercepts calls to Cloudflare's siteverify
+ * endpoint. Anything else throws so an accidentally-real outbound call is
+ * loud rather than silently passing.
+ */
+function stubTurnstileFetch({ success = true, ok = true } = {}) {
+  const fetchSpy = vi.fn(async (url) => {
+    if (typeof url === 'string' && url.includes('challenges.cloudflare.com/turnstile')) {
+      return {
+        ok,
+        json: async () => ({ success }),
+      };
+    }
+    throw new Error(`Unexpected fetch in test: ${url}`);
+  });
+  globalThis.fetch = fetchSpy;
+  return fetchSpy;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('upload-photo handler', () => {
   let handler;
+  let originalFetch;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -79,9 +130,39 @@ describe('upload-photo handler', () => {
       contentType: 'image/jpeg',
       contentDisposition: 'attachment; filename="photo.jpg"',
     });
-    process.env.BLOB_READ_WRITE_TOKEN = TEST_TOKEN;
+
+    // Default sharp mock: identity pipeline. The handler chain is
+    // `sharp(buf).rotate().<format>().toBuffer()` — every call returns the
+    // same pipeline object so chaining works, then toBuffer resolves with
+    // the original buffer.
+    mockSharpToBuffer.mockReset();
+    mockSharpCtor.mockReset();
+    mockSharpCtor.mockImplementation((buf) => {
+      const pipeline = {
+        rotate: vi.fn(() => pipeline),
+        jpeg: vi.fn(() => pipeline),
+        png: vi.fn(() => pipeline),
+        webp: vi.fn(() => pipeline),
+        toBuffer: () => {
+          mockSharpToBuffer(buf);
+          return Promise.resolve(Buffer.isBuffer(buf) ? buf : Buffer.from(buf));
+        },
+      };
+      return pipeline;
+    });
+
+    process.env.BLOB_READ_WRITE_TOKEN = TEST_BLOB_TOKEN;
+    process.env.TURNSTILE_SECRET_KEY = TEST_TURNSTILE_SECRET;
+
+    originalFetch = globalThis.fetch;
+    stubTurnstileFetch({ success: true });
+
     const mod = await import('../../api/upload-photo.js');
     handler = mod.default;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
   it('handles OPTIONS preflight', async () => {
@@ -111,6 +192,20 @@ describe('upload-photo handler', () => {
     expect(res._json.error).toContain('not configured');
   });
 
+  it('returns 500 when TURNSTILE_SECRET_KEY is not configured', async () => {
+    vi.resetModules();
+    delete process.env.TURNSTILE_SECRET_KEY;
+    const mod = await import('../../api/upload-photo.js');
+    const localHandler = mod.default;
+    const res = createRes();
+    await localHandler(
+      createReq({ body: buildMultipartBody() }),
+      res
+    );
+    expect(res._status).toBe(500);
+    expect(res._json.error).toContain('not configured');
+  });
+
   it('returns 400 when Content-Type is not multipart/form-data', async () => {
     const res = createRes();
     await handler(
@@ -120,12 +215,63 @@ describe('upload-photo handler', () => {
     expect(res._status).toBe(400);
   });
 
-  it('returns 400 when multipart body has no file part', async () => {
-    // A multipart body with only a non-file field
+  it('returns 403 when the multipart body is missing the turnstile_token field', async () => {
+    const res = createRes();
+    await handler(
+      createReq({ body: buildMultipartBody({ includeTurnstileField: false }) }),
+      res
+    );
+    expect(res._status).toBe(403);
+    expect(res._json.error).toMatch(/security verification/i);
+    // Nothing should hit Vercel Blob if Turnstile didn't pass.
+    expect(mockPut).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when Cloudflare reports the Turnstile token as invalid', async () => {
+    stubTurnstileFetch({ success: false });
+    const res = createRes();
+    await handler(
+      createReq({ body: buildMultipartBody() }),
+      res
+    );
+    expect(res._status).toBe(403);
+    expect(mockPut).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the Turnstile siteverify call itself errors out', async () => {
+    stubTurnstileFetch({ success: false, ok: false });
+    const res = createRes();
+    await handler(
+      createReq({ body: buildMultipartBody() }),
+      res
+    );
+    expect(res._status).toBe(403);
+    expect(mockPut).not.toHaveBeenCalled();
+  });
+
+  it('POSTs the turnstile token to Cloudflare with the configured secret', async () => {
+    const fetchSpy = stubTurnstileFetch({ success: true });
+    const res = createRes();
+    await handler(
+      createReq({ body: buildMultipartBody({ turnstileToken: 'token-XYZ' }) }),
+      res
+    );
+    expect(res._status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [verifyUrl, init] = fetchSpy.mock.calls[0];
+    expect(String(verifyUrl)).toContain('challenges.cloudflare.com/turnstile');
+    expect(init && init.method).toBe('POST');
+    const sentBody = JSON.parse(init.body);
+    expect(sentBody.secret).toBe(TEST_TURNSTILE_SECRET);
+    expect(sentBody.response).toBe('token-XYZ');
+  });
+
+  it('returns 400 when multipart body has no file part (but token is present)', async () => {
+    // A multipart body with only the turnstile_token field — no file.
     const body = Buffer.from(
       `--${BOUNDARY}\r\n` +
-        `Content-Disposition: form-data; name="not-a-file"\r\n\r\n` +
-        `hello\r\n` +
+        `Content-Disposition: form-data; name="turnstile_token"\r\n\r\n` +
+        `${TEST_TURNSTILE_TOKEN}\r\n` +
         `--${BOUNDARY}--\r\n`,
       'utf8'
     );
@@ -151,6 +297,52 @@ describe('upload-photo handler', () => {
     expect(typeof res._json.url).toBe('string');
     expect(res._json.url).toMatch(/^https?:\/\//);
     expect(mockPut).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the uploaded buffer through sharp() before storage (EXIF stripping)', async () => {
+    const res = createRes();
+    await handler(
+      createReq({
+        body: buildMultipartBody({
+          filename: 'with-gps.jpg',
+          contentType: 'image/jpeg',
+          data: Buffer.from('jpeg-bytes-with-exif'),
+        }),
+      }),
+      res
+    );
+    expect(res._status).toBe(200);
+    // sharp was constructed with the raw buffer, and the cleaned buffer
+    // (not the raw buffer) is what flows into put().
+    expect(mockSharpCtor).toHaveBeenCalledTimes(1);
+    expect(mockSharpToBuffer).toHaveBeenCalledTimes(1);
+    expect(mockPut).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 415 when sharp fails to decode the image', async () => {
+    mockSharpCtor.mockImplementationOnce(() => {
+      const pipeline = {
+        rotate: () => pipeline,
+        jpeg: () => pipeline,
+        png: () => pipeline,
+        webp: () => pipeline,
+        toBuffer: () => Promise.reject(new Error('Input file is not a recognised image')),
+      };
+      return pipeline;
+    });
+    const res = createRes();
+    await handler(
+      createReq({
+        body: buildMultipartBody({
+          filename: 'corrupt.jpg',
+          contentType: 'image/jpeg',
+          data: Buffer.from('this-is-not-an-image'),
+        }),
+      }),
+      res
+    );
+    expect(res._status).toBe(415);
+    expect(mockPut).not.toHaveBeenCalled();
   });
 
   it('accepts a valid PNG upload', async () => {
@@ -281,7 +473,7 @@ describe('upload-photo handler', () => {
     expect(res._status).toBe(200);
     const [, , options] = mockPut.mock.calls[0];
     expect(options).toBeDefined();
-    expect(options.token).toBe(TEST_TOKEN);
+    expect(options.token).toBe(TEST_BLOB_TOKEN);
     expect(options.access).toBe('public');
   });
 
@@ -343,7 +535,7 @@ describe('upload-photo handler', () => {
     }
     expect(mockPut).toHaveBeenCalledTimes(5);
     for (const call of mockPut.mock.calls) {
-      expect(call[2].token).toBe(TEST_TOKEN);
+      expect(call[2].token).toBe(TEST_BLOB_TOKEN);
     }
   });
 
