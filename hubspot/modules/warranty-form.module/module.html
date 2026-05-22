@@ -1,7 +1,7 @@
 <!--
-  MOSS Contact Form - HubSpot Custom Module (Accordion Multi-Step)
+  MOSS Warranty Form - HubSpot Custom Module (Accordion Multi-Step)
 
-  Process overview → Form → Calendar embed → Confirmation
+  Warranty intake → Calendar embed → Confirmation
 -->
 
 {% if module.turnstile_site_key %}
@@ -17,7 +17,7 @@
 {% set project_prop = crm_property_definition("contact", "please_select_the_project_types_that_most_closely_match_your_current_request_") %}
 {% set howheard_prop = crm_property_definition("contact", "how_did_you_hear_about_us_") %}
 
-<div class="moss-contact-form-container">
+<div class="moss-contact-form-container moss-warranty-form-container">
   <!-- Header -->
   <div class="contact-form-header">
     {% if module.header_text %}
@@ -33,27 +33,27 @@
     {{ module.section_text }}
   </div>
 
-  <!-- Process Steps -->
+  <!-- Process Steps (warranty intake flow) -->
   <div class="process-row">
     <div class="process-card">
       <div class="process-num">1</div>
-      <div class="process-title">Virtual Discovery</div>
-      <div class="process-desc">30 min video chat to discuss your project</div>
+      <div class="process-title">Submit Claim</div>
+      <div class="process-desc">Share the details of your warranty issue</div>
     </div>
     <div class="process-card">
       <div class="process-num">2</div>
-      <div class="process-title">In-Home Visit</div>
-      <div class="process-desc">We measure and understand your space</div>
+      <div class="process-title">Schedule Inspection</div>
+      <div class="process-desc">Pick a time for us to take a look</div>
     </div>
     <div class="process-card">
       <div class="process-num">3</div>
-      <div class="process-title">Project Presentation</div>
-      <div class="process-desc">Meet your team and review options</div>
+      <div class="process-title">Repair Assessment</div>
+      <div class="process-desc">We diagnose the issue on-site</div>
     </div>
     <div class="process-card">
       <div class="process-num">4</div>
-      <div class="process-title">Risk-Free Next Step</div>
-      <div class="process-desc">$2,500 fully refundable deposit to begin</div>
+      <div class="process-title">Resolution</div>
+      <div class="process-desc">We make it right and stand behind our work</div>
     </div>
   </div>
 
@@ -72,7 +72,7 @@
       <div class="step-badge">1</div>
       <div class="step-title">
         <h3>Your Information</h3>
-        <p>Tell us about your project</p>
+        <p>Tell us about the issue</p>
       </div>
       <div class="step-chevron">&#9662;</div>
     </div>
@@ -87,7 +87,12 @@
         <!-- Loading Overlay -->
         <div id="contact-form-loading" class="contact-form-loading">
           <div class="contact-form-spinner"></div>
-          <p>Finding your project team...</p>
+          <p>Submitting your claim...</p>
+        </div>
+
+        <!-- Warranty success message (hidden; MOS-206 will surface this on submit) -->
+        <div id="warranty-success-message" class="warranty-success-message" hidden>
+          Got it. Redirecting you to schedule your warranty appointment now.
         </div>
 
         <form id="moss-contact-form" novalidate>
@@ -213,7 +218,7 @@
           <!-- Submit Button -->
           <div class="form-group full-width submit-group">
             <button type="submit" id="cf-submit-btn" class="contact-submit-btn" {% if module.submit_button_color %}style="background-color: {{ module.submit_button_color }};"{% endif %}>
-              Next: Schedule
+              Submit warranty claim
             </button>
           </div>
         </form>

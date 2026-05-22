@@ -1,11 +1,15 @@
 /* =============================================================================
-   MOSS Contact Form - Custom Module Styles (Single-Column, Process First)
+   MOSS Warranty Form - Custom Module Styles (Single-Column, Process First)
+
+   Warm-gray brand palette (vs. contact form's MOSS green #8CA07E / #4c711d).
+   Fonts, spacing, and input styling intentionally remain dimensionally close
+   to the contact form so customers don't feel like they're on a different site.
    ============================================================================= */
 
 .moss-contact-form-container {
   max-width: 800px;
   margin: 0 auto;
-  background: #8CA07E;
+  background: #6B6457; /* warm gray container — warranty accent */
   border-radius: 8px;
   padding: 40px;
   font-family: inherit;
@@ -14,6 +18,14 @@
 .moss-contact-form-container * {
   box-sizing: border-box;
 }
+
+/*
+ * .moss-warranty-form-container is applied alongside .moss-contact-form-container
+ * in module.html as an intentional CSS hook for warranty-specific overrides.
+ * No rules are defined yet — the container currently inherits the base styles
+ * above. Add warranty-only overrides here when divergence from the contact-form
+ * layout/palette is required.
+ */
 
 /* Header */
 .contact-form-header {
@@ -114,7 +126,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  background: #4c711d;
+  background: #3F3A33; /* warranty accent — warm dark gray */
   border-radius: 50%;
   font-size: 13px;
   font-weight: 700;
@@ -195,7 +207,7 @@
 }
 
 .accordion-card.active .accordion-header {
-  background: #f0f5ec;
+  background: #f3f1ee; /* soft warm-gray tint to match warranty palette */
 }
 
 .accordion-card.completed .accordion-header {
@@ -224,19 +236,19 @@
 }
 
 .accordion-card.active .step-badge {
-  background: #4c711d;
+  background: #3F3A33; /* warranty accent */
   color: #ffffff;
   animation: pulseBorder 2s ease-in-out infinite;
 }
 
 .accordion-card.completed .step-badge {
-  background: #4c711d;
+  background: #3F3A33;
   color: #ffffff;
 }
 
 @keyframes pulseBorder {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(76, 113, 29, 0.4); }
-  50% { box-shadow: 0 0 0 6px rgba(76, 113, 29, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 58, 51, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(63, 58, 51, 0); }
 }
 
 /* Step Title */
@@ -272,7 +284,7 @@
 
 .accordion-card.active .step-chevron {
   transform: rotate(180deg);
-  color: #4c711d;
+  color: #3F3A33;
 }
 
 .accordion-card.locked .step-chevron {
@@ -374,8 +386,8 @@
 .form-group input:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #4c711d;
-  box-shadow: 0 0 0 2px rgba(76, 113, 29, 0.2);
+  border-color: #3F3A33;
+  box-shadow: 0 0 0 2px rgba(63, 58, 51, 0.2);
 }
 
 /* Error States */
@@ -414,7 +426,7 @@
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  accent-color: #4c711d;
+  accent-color: #3F3A33;
 }
 
 /* Consent Checkboxes */
@@ -437,7 +449,7 @@
 .contact-submit-btn {
   width: 100%;
   padding: 16px 40px;
-  background: #4c711d;
+  background: #6B6457; /* warm gray — warranty primary */
   color: #ffffff;
   border: none;
   border-radius: 40px;
@@ -450,7 +462,7 @@
 }
 
 .contact-submit-btn:hover {
-  background: #3d5c16;
+  background: #4F4A40;
 }
 
 .contact-submit-btn:disabled {
@@ -514,8 +526,8 @@
 }
 
 .contact-form-spinner {
-  border: 4px solid rgba(76, 113, 29, 0.2);
-  border-top: 4px solid #4c711d;
+  border: 4px solid rgba(63, 58, 51, 0.2);
+  border-top: 4px solid #3F3A33;
   border-radius: 50%;
   width: 40px;
   height: 40px;
@@ -532,6 +544,75 @@
   display: flex;
   justify-content: center;
   margin: 16px 0;
+}
+
+/* =============================================================================
+   Warranty Photo Upload Area
+   (Selectors only — MOS-205 owns the <input type="file"> markup and JS.)
+   ============================================================================= */
+
+.photo-upload-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 140px;
+  padding: 24px 16px;
+  border: 2px dashed #b8b1a5; /* warm-gray dashed cue */
+  border-radius: 10px;
+  background: #fafaf8;
+  color: #3F3A33;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.photo-upload-area:hover {
+  border-color: #6B6457;
+  background: #f3f1ee;
+  color: #2d2d2d;
+}
+
+.photo-upload-area:focus-within {
+  outline: none;
+  border-color: #3F3A33;
+  box-shadow: 0 0 0 2px rgba(63, 58, 51, 0.2);
+}
+
+.photo-upload-area.drag-over {
+  border-color: #3F3A33;
+  border-style: solid;
+  background: #efece6;
+  color: #2d2d2d;
+}
+
+.photo-upload-area .photo-upload-hint {
+  font-size: 12px;
+  color: #6b6457;
+}
+
+/* =============================================================================
+   Warranty Success Message
+   (Hidden by default; MOS-206 will reveal it on successful submit.)
+   ============================================================================= */
+
+.warranty-success-message {
+  background: #f3f1ee;
+  border: 1px solid #d8d2c5;
+  color: #3F3A33;
+  border-radius: 4px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.warranty-success-message[hidden] {
+  display: none;
 }
 
 /* =============================================================================
@@ -585,7 +666,7 @@
 .confirmation-check {
   width: 64px;
   height: 64px;
-  background: #4c711d;
+  background: #3F3A33;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -624,7 +705,7 @@
 
 .confirmation-next-steps {
   text-align: left;
-  background: #f8faf6;
+  background: #f6f4f1; /* soft warm-gray tint */
   border-radius: 8px;
   padding: 20px 24px;
   margin-top: 20px;
@@ -652,14 +733,23 @@
 
 .confirmation-next-steps li::before {
   content: "\2713";
-  color: #4c711d;
+  color: #3F3A33;
   font-weight: 700;
   margin-right: 10px;
 }
 
 /* =============================================================================
    Responsive
+   Mobile-first: target viewports 375px (mobile), 768px (tablet), 1280px (desktop).
    ============================================================================= */
+
+/* Desktop: keep container at its max-width and roomy padding */
+@media (min-width: 1024px) {
+  .moss-contact-form-container {
+    max-width: 800px;
+    padding: 40px;
+  }
+}
 
 @media (max-width: 768px) {
   .moss-contact-form-container {
@@ -739,6 +829,12 @@
 @media (max-width: 420px) {
   .moss-contact-form-container {
     padding: 20px 14px;
+  }
+
+  .photo-upload-area {
+    min-height: 120px;
+    padding: 18px 12px;
+    font-size: 13px;
   }
 
   .process-row {
