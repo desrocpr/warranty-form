@@ -77,17 +77,14 @@ test.describe('warranty form production smoke', () => {
     'Set RUN_SMOKE=1 (e.g. `npm run test:smoke`) to execute this against production.'
   );
 
+  test.skip(
+    !HUBSPOT_ACCESS_TOKEN,
+    'HUBSPOT_ACCESS_TOKEN not set — required to verify the created ticket via the HubSpot Tickets API. ' +
+      'Pull it from Doppler (`doppler secrets get HUBSPOT_ACCESS_TOKEN -p warranty-form -c prd`) and re-run.'
+  );
+
   test('submits payload, creates HubSpot ticket, returns cal.com booking URL', async () => {
     test.setTimeout(60_000);
-
-    if (!HUBSPOT_ACCESS_TOKEN) {
-      throw new Error(
-        'HUBSPOT_ACCESS_TOKEN is required to verify the created ticket via ' +
-          'the HubSpot Tickets API. Pull it from Doppler ' +
-          '(`doppler secrets get HUBSPOT_ACCESS_TOKEN -p warranty-form -c prd`) ' +
-          'and re-run.'
-      );
-    }
 
     // 1. POST to production submit endpoint
     const submitResponse = await fetch(WARRANTY_API_URL, {
