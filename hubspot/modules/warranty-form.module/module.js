@@ -785,6 +785,26 @@
     .then(function(result) {
       showLoading(false);
 
+      // MOS-206: warranty flow redirects to cal.com instead of embedding a calendar.
+      // When the API returns a `bookingUrl`, short-circuit the embed branch and redirect.
+      // If `success: true` but `bookingUrl` is missing/null, log to client-error
+      // and fall back to the configured fallback calendar URL.
+      if (result.ok && result.data && result.data.success && result.data.bookingUrl !== undefined) {
+        if (result.data.bookingUrl) {
+          performBookingRedirect(result.data.bookingUrl, result.data.ticketId);
+        } else {
+          reportClientError('cal_com_url_missing', 'API returned success but bookingUrl was null/empty');
+          var missingConfig = getConfig();
+          var missingFallback = missingConfig.fallbackCalendarUrl;
+          if (typeof missingFallback === 'string' && missingFallback) {
+            performBookingRedirect(missingFallback, result.data.ticketId);
+          } else {
+            showStatus('Your warranty claim has been submitted, but our scheduling link is temporarily unavailable. A member of our team will reach out to schedule your appointment.', false);
+          }
+        }
+        return;
+      }
+
       if (result.ok && result.data.success && result.data.calendarUrl) {
         // Populate step 1 summary and advance to step 2
         populateStep1Summary(formData);
@@ -820,6 +840,69 @@
       }
       resetTurnstile();
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Booking Redirect (MOS-206)
+  // ---------------------------------------------------------------------------
+
+  // How long to leave the "submitted, redirecting…" message visible before
+  // navigating away. Kept short so the page never feels stuck.
+  var REDIRECT_DELAY_MS = 2000;
+
+  // Hard-coded allowlist of hostnames we will redirect to after a successful
+  // submission. Defends against an open-redirect via a tampered API response
+  // (HIGH risk noted on the PR review): even if a downstream bug or a MITM
+  // causes the API to return an attacker-controlled `bookingUrl`, we refuse
+  // to navigate anywhere outside this list. `cal.com` is the booking host;
+  // the moss host covers the operator-configured fallback URL.
+  var ALLOWED_BOOKING_HOSTS = [
+    'cal.com',
+    'mossbuildinganddesign.com',
+    'www.mossbuildinganddesign.com'
+  ];
+
+  // Origin check for any redirect target (booking URL OR fallback URL).
+  // Requires https + an allowlisted hostname; anything else (javascript:,
+  // data:, wrong host, malformed URL) is rejected.
+  function isAllowedBookingUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    try {
+      var parsed = new URL(url);
+      if (parsed.protocol !== 'https:') return false;
+      return ALLOWED_BOOKING_HOSTS.indexOf(parsed.hostname.toLowerCase()) !== -1;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Show a "submitted, redirecting…" status and navigate to the cal.com booking URL
+  // after a short pause so the user can read the confirmation. Tolerates a missing
+  // ticketId by falling back to a generic confirmation message. The destination URL
+  // is run through `isAllowedBookingUrl` first; a failed check logs and short-circuits
+  // so the customer sees the offline-scheduling message instead of being redirected
+  // to a potentially attacker-controlled destination.
+  function performBookingRedirect(bookingUrl, ticketId) {
+    if (!isAllowedBookingUrl(bookingUrl)) {
+      reportClientError('cal_com_redirect_blocked', 'bookingUrl failed origin check: ' + bookingUrl);
+      showStatus('Your warranty claim has been submitted, but our scheduling link is temporarily unavailable. A member of our team will reach out to schedule your appointment.', false);
+      return;
+    }
+
+    var statusEl = document.getElementById('contact-form-status');
+    var message = ticketId
+      ? 'Your warranty claim has been submitted (Ticket #' + ticketId + '). Redirecting to schedule…'
+      : 'Your warranty claim has been submitted. Redirecting to schedule…';
+
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.className = 'contact-form-status status-success';
+      statusEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    setTimeout(function() {
+      window.location.href = bookingUrl;
+    }, REDIRECT_DELAY_MS);
   }
 
   // ---------------------------------------------------------------------------
