@@ -1,5 +1,5 @@
 /* =============================================================================
-   MOSS Contact Form - Client-Side Logic (Accordion Multi-Step)
+   MOSS Warranty Form - Client-Side Logic (Accordion Multi-Step)
    ============================================================================= */
 
 (function() {
@@ -34,6 +34,9 @@
   // Store the calendar URL returned by the API for embed fallback links
   var lastCalendarUrl = null;
 
+  // Photo upload caps — also enforced server-side by MOS-205.
+  var MAX_PHOTO_FILES = 5;
+
   // ---------------------------------------------------------------------------
   // Error Reporting & Fallbacks
   // ---------------------------------------------------------------------------
@@ -48,7 +51,8 @@
       headers['Authorization'] = 'Bearer ' + config.callbackApiKey;
     }
 
-    var errorUrl = baseUrl.replace('/submit-contact', '/client-error');
+    var errorUrl = baseUrl.replace('/submit-contact', '/client-error')
+                          .replace('/submit-warranty', '/client-error');
     fetch(errorUrl, {
       method: 'POST',
       headers: headers,
@@ -80,7 +84,7 @@
       '&mdash; not a problem with our website. We apologize for the inconvenience.</p>' +
       '<div style="margin-top: 24px; padding: 20px; background: #f8f8f6; border-radius: 8px;">' +
       '<p style="margin: 0 0 8px; font-weight: 700;">A member of our team has been notified and will follow up with you shortly.</p>' +
-      '<p style="margin: 0; color: #555;">We have your contact information on file and will reach out to schedule your discovery call.</p>' +
+      '<p style="margin: 0; color: #555;">We have your contact information on file and will reach out to schedule your warranty appointment.</p>' +
       '</div>';
     if (fallbackUrl) {
       html += '<p style="margin-top: 20px; color: #555;">You can also try this direct link:</p>' +
@@ -106,17 +110,17 @@
       headers['Authorization'] = 'Bearer ' + config.callbackApiKey;
     }
 
-    var failureUrl = baseUrl.replace('/submit-contact', '/embed-failure');
+    var failureUrl = baseUrl.replace('/submit-contact', '/embed-failure')
+                            .replace('/submit-warranty', '/embed-failure');
     fetch(failureUrl, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
         contact: {
-          firstname: submittedFormData.firstname,
-          lastname: submittedFormData.lastname,
+          name: submittedFormData.name,
           email: submittedFormData.email,
           phone: submittedFormData.phone,
-          zip: submittedFormData.zip
+          originalAddress: submittedFormData.originalAddress
         },
         embedType: embedType,
         calendarUrl: calendarUrl || null,
@@ -196,13 +200,17 @@
     if (!summary) return;
 
     var parts = [];
-    parts.push('<span><strong>' + escapeHtml(formData.firstname) + ' ' + escapeHtml(formData.lastname) + '</strong></span>');
-    parts.push('<span>' + escapeHtml(formData.email) + '</span>');
-    parts.push('<span>' + escapeHtml(formData.phone) + '</span>');
-
-    var stateEl = document.getElementById('cf-state');
-    if (stateEl && stateEl.selectedOptions[0]) {
-      parts.push('<span>' + escapeHtml(stateEl.selectedOptions[0].text) + ' ' + escapeHtml(formData.zip) + '</span>');
+    if (formData.name) {
+      parts.push('<span><strong>' + escapeHtml(formData.name) + '</strong></span>');
+    }
+    if (formData.email) {
+      parts.push('<span>' + escapeHtml(formData.email) + '</span>');
+    }
+    if (formData.phone) {
+      parts.push('<span>' + escapeHtml(formData.phone) + '</span>');
+    }
+    if (formData.issueCategory) {
+      parts.push('<span>' + escapeHtml(formData.issueCategory) + '</span>');
     }
 
     summary.innerHTML = parts.join('');
@@ -297,7 +305,7 @@
       elementOrSelector: '#calendar-embed-container',
       calLink: calLink,
       config: {
-        name: formData.firstname + ' ' + formData.lastname,
+        name: formData.name,
         email: formData.email,
         layout: 'month_view'
       }
@@ -306,7 +314,7 @@
     Cal('ui', {
       theme: 'light',
       styles: {
-        branding: { brandColor: '#4c711d' }
+        branding: { brandColor: '#3F3A33' }
       }
     });
 
@@ -322,20 +330,12 @@
   function renderHubSpotMeetingsEmbed(container, calendarUrl, formData) {
     // Build embed URL with pre-filled params
     // HubSpot meetings uses internal property names (lowercase)
-    // Pass both camelCase and lowercase for compatibility
-    var stateEl = document.getElementById('cf-state');
-    var stateLabel = (stateEl && stateEl.selectedOptions[0]) ? stateEl.selectedOptions[0].text : formData.state;
-
     var embedUrl = calendarUrl +
       (calendarUrl.indexOf('?') !== -1 ? '&' : '?') +
       'embed=true' +
-      '&firstname=' + encodeURIComponent(formData.firstname) +
-      '&lastname=' + encodeURIComponent(formData.lastname) +
-      '&email=' + encodeURIComponent(formData.email) +
-      '&phone=' + encodeURIComponent(formData.phone) +
-      '&mobilephone=' + encodeURIComponent(formData.phone) +
-      '&state=' + encodeURIComponent(stateLabel) +
-      '&zip=' + encodeURIComponent(formData.zip);
+      '&email=' + encodeURIComponent(formData.email || '') +
+      '&phone=' + encodeURIComponent(formData.phone || '') +
+      '&mobilephone=' + encodeURIComponent(formData.phone || '');
 
     container.innerHTML = '<div class="meetings-iframe-container" data-src="' + escapeHtml(embedUrl) + '"></div>';
 
@@ -396,7 +396,7 @@
     // Populate step 2 summary
     var summary = document.getElementById('step-2-summary');
     if (summary) {
-      summary.innerHTML = '<span><strong>Call scheduled</strong></span>';
+      summary.innerHTML = '<span><strong>Inspection scheduled</strong></span>';
     }
 
     completeStep(2);
@@ -407,6 +407,7 @@
       var config = getConfig();
       var callbackUrl = config.submitEndpointUrl
         ? config.submitEndpointUrl.replace('/submit-contact', '/booking-callback')
+                                   .replace('/submit-warranty', '/booking-callback')
         : null;
 
       if (callbackUrl) {
@@ -421,90 +422,16 @@
           body: JSON.stringify({
             type: bookingType,
             contact: {
-              firstname: submittedFormData.firstname,
-              lastname: submittedFormData.lastname,
+              name: submittedFormData.name,
               email: submittedFormData.email,
               phone: submittedFormData.phone,
-              zip: submittedFormData.zip
+              originalAddress: submittedFormData.originalAddress
             },
             bookingData: eventData || {}
           })
         }).catch(function() { /* fire-and-forget */ });
       }
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // UTM Capture
-  // ---------------------------------------------------------------------------
-
-  function captureUTMParams() {
-    var params = new URLSearchParams(window.location.search);
-    var utmFields = {
-      'utm_campaign': 'cf-utm-campaign',
-      'utm_term': 'cf-utm-term',
-      'utm_source': 'cf-utm-source',
-      'utm_content': 'cf-utm-content',
-      'utm_medium': 'cf-utm-medium'
-    };
-
-    Object.keys(utmFields).forEach(function(param) {
-      var value = params.get(param);
-      var el = document.getElementById(utmFields[param]);
-      if (value && el) {
-        el.value = value;
-      }
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Conditional Fields
-  // ---------------------------------------------------------------------------
-
-  function setupConditionalFields() {
-    var howHeardSelect = document.getElementById('cf-how-heard');
-    if (!howHeardSelect) return;
-    var config = getConfig();
-
-    howHeardSelect.addEventListener('change', function() {
-      var value = this.value;
-      var referralGroup = document.getElementById('referral-name-group');
-      var eventGroup = document.getElementById('event-details-group');
-
-      // Referral name: shown for "Referred by a Friend"
-      if (referralGroup) {
-        referralGroup.style.display = (value === config.referralValue) ? '' : 'none';
-      }
-
-      // Event details: shown for "Community Sponsorship" or "Event"
-      if (eventGroup) {
-        eventGroup.style.display = (value === config.communitySponsorshipValue || value === config.eventValue) ? '' : 'none';
-      }
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Phone Number Formatting
-  // ---------------------------------------------------------------------------
-
-  function setupPhoneFormatting() {
-    var phoneInput = document.getElementById('cf-phone');
-    if (!phoneInput) return;
-
-    phoneInput.addEventListener('input', function(e) {
-      var digits = e.target.value.replace(/\D/g, '');
-      var formatted = '';
-
-      if (digits.length >= 6) {
-        formatted = '(' + digits.substring(0, 3) + ') ' + digits.substring(3, 6) + '-' + digits.substring(6, 10);
-      } else if (digits.length >= 3) {
-        formatted = '(' + digits.substring(0, 3) + ') ' + digits.substring(3);
-      } else {
-        formatted = digits;
-      }
-
-      e.target.value = formatted;
-    });
   }
 
   // ---------------------------------------------------------------------------
@@ -741,15 +668,158 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Zip Code Formatting
+  // Photo Dropzone (MOS-203)
+  //
+  // Wraps the dropzone DOM that MOS-203 added around the file input:
+  //   - drag-and-drop forwards dropped files into the file input
+  //   - inline thumbnail previews appear next to each row created by
+  //     setupPhotoUpload's change handler
+  //   - selections beyond MAX_PHOTO_FILES are rejected with an inline
+  //     status message; the file input never sees the rejected files so
+  //     setupPhotoUpload's enqueue path doesn't even run for them
+  //
+  // setupPhotoUpload (MOS-205) is owned by MOS-205 and is NOT mutated by
+  // MOS-203. All wrapping happens here — we attach a capture-phase listener
+  // to the same input so the cap fires before MOS-205's bubble-phase
+  // listener picks up the change event.
   // ---------------------------------------------------------------------------
 
-  function setupZipFormatting() {
-    var zipInput = document.getElementById('cf-zip');
-    if (!zipInput) return;
+  function setupPhotoDropzone() {
+    var input = document.getElementById('cf-photo-input');
+    var dropzone = document.getElementById('cf-photo-dropzone');
+    if (!input || !dropzone) return;
 
-    zipInput.addEventListener('input', function(e) {
-      e.target.value = e.target.value.replace(/\D/g, '').substring(0, 5);
+    var photoStatusEl = document.getElementById('error-photo-input');
+    var queuedCount = 0;
+
+    function setPhotoStatus(msg) {
+      if (photoStatusEl) photoStatusEl.textContent = msg || '';
+    }
+
+    // Build a DataTransfer from a plain array of File objects.
+    function filesToDataTransfer(files) {
+      try {
+        var dt = new DataTransfer();
+        files.forEach(function(f) { dt.items.add(f); });
+        return dt;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // Trim a FileList down to the remaining cap; rejected files trigger the
+    // inline status message.
+    function gateFiles(fileList) {
+      var allowed = [];
+      var rejected = 0;
+      for (var i = 0; i < fileList.length; i++) {
+        if (queuedCount + allowed.length >= MAX_PHOTO_FILES) {
+          rejected++;
+          continue;
+        }
+        allowed.push(fileList[i]);
+      }
+      if (rejected > 0) {
+        setPhotoStatus('You can upload up to ' + MAX_PHOTO_FILES + ' photos. ' + rejected + ' file(s) were not added.');
+      } else if (allowed.length > 0) {
+        setPhotoStatus('');
+      }
+      return allowed;
+    }
+
+    // Attach an <img class="cf-photo-thumb"> to the most recently added rows
+    // for the given files. setupPhotoUpload appends rows synchronously inside
+    // its change-event handler, so by the time control returns here the
+    // matching rows already exist at the tail of #cf-photo-list.
+    function attachThumbnails(files) {
+      var listContainer = document.getElementById('cf-photo-list');
+      if (!listContainer || !files.length) return;
+      var rows = listContainer.querySelectorAll('.cf-photo-row');
+      // Walk from the end backwards: the last `files.length` rows are the
+      // ones MOS-205 just added for this batch.
+      for (var i = 0; i < files.length; i++) {
+        var row = rows[rows.length - files.length + i];
+        if (!row) continue;
+        // Skip if we've already attached a thumbnail (e.g. retry).
+        if (row.querySelector('.cf-photo-thumb')) continue;
+        var thumb = document.createElement('img');
+        thumb.className = 'cf-photo-thumb';
+        thumb.alt = '';
+        try {
+          thumb.src = URL.createObjectURL(files[i]);
+        } catch (e) { /* preview is non-critical */ }
+        row.insertBefore(thumb, row.firstChild);
+      }
+    }
+
+    // Capture-phase listener — runs before setupPhotoUpload's bubble-phase
+    // listener. We mark events we re-dispatch with __gated to avoid recursion.
+    input.addEventListener('change', function(e) {
+      if (e.__gated) return; // our re-dispatched event — let MOS-205 handle it
+      var files = e.target && e.target.files ? e.target.files : [];
+      if (!files.length) return;
+
+      var allowed = gateFiles(files);
+      // Always stop the original event so MOS-205's bubble listener does not
+      // see the un-gated FileList.
+      e.stopImmediatePropagation();
+      if (!allowed.length) {
+        input.value = '';
+        return;
+      }
+
+      var dt = filesToDataTransfer(allowed);
+      if (!dt) {
+        // Fall back to letting the un-gated list through if DataTransfer is
+        // unavailable — better to over-upload than to fail silently.
+        var fallback = new Event('change', { bubbles: true });
+        fallback.__gated = true;
+        queuedCount += files.length;
+        input.dispatchEvent(fallback);
+        setTimeout(function() { attachThumbnails(Array.prototype.slice.call(files)); }, 0);
+        return;
+      }
+
+      try {
+        input.files = dt.files;
+      } catch (ex) { /* some browsers reject — input.files stays as-is */ }
+      queuedCount += allowed.length;
+
+      var gatedEvent = new Event('change', { bubbles: true });
+      gatedEvent.__gated = true;
+      input.dispatchEvent(gatedEvent);
+      // Attach thumbnails after MOS-205's bubble listener has added the rows.
+      setTimeout(function() { attachThumbnails(allowed); }, 0);
+    }, true);
+
+    // Drag-and-drop on the dropzone — forwards dropped files into the input
+    // by setting input.files and dispatching a change event. The capture-phase
+    // listener above will gate the count and re-dispatch.
+    ['dragenter', 'dragover'].forEach(function(evt) {
+      dropzone.addEventListener(evt, function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('drag-over');
+      });
+    });
+    ['dragleave', 'dragend'].forEach(function(evt) {
+      dropzone.addEventListener(evt, function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('drag-over');
+      });
+    });
+    dropzone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('drag-over');
+      var files = (e.dataTransfer && e.dataTransfer.files) ? e.dataTransfer.files : null;
+      if (!files || !files.length) return;
+      try {
+        input.files = files;
+      } catch (ex) { /* fall back — see below */ }
+      var change = new Event('change', { bubbles: true });
+      input.dispatchEvent(change);
     });
   }
 
@@ -776,22 +846,17 @@
     clearErrors();
     var valid = true;
 
-    // First name
-    var firstname = document.getElementById('cf-firstname').value.trim();
-    if (!firstname) {
-      showFieldError('cf-firstname', 'error-firstname', 'Please enter your first name.');
-      valid = false;
-    }
-
-    // Last name
-    var lastname = document.getElementById('cf-lastname').value.trim();
-    if (!lastname) {
-      showFieldError('cf-lastname', 'error-lastname', 'Please enter your last name.');
+    // Name
+    var nameEl = document.getElementById('cf-name');
+    var name = nameEl ? nameEl.value.trim() : '';
+    if (!name) {
+      showFieldError('cf-name', 'error-name', 'Please enter your full name.');
       valid = false;
     }
 
     // Email
-    var email = document.getElementById('cf-email').value.trim();
+    var emailEl = document.getElementById('cf-email');
+    var email = emailEl ? emailEl.value.trim() : '';
     var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email) {
       showFieldError('cf-email', 'error-email', 'Please enter your email address.');
@@ -802,7 +867,8 @@
     }
 
     // Phone
-    var phone = document.getElementById('cf-phone').value.trim();
+    var phoneEl = document.getElementById('cf-phone');
+    var phone = phoneEl ? phoneEl.value.trim() : '';
     var phoneDigits = phone.replace(/\D/g, '');
     if (!phone) {
       showFieldError('cf-phone', 'error-phone', 'Please enter your phone number.');
@@ -812,35 +878,46 @@
       valid = false;
     }
 
-    // State
-    var state = document.getElementById('cf-state').value;
-    if (!state) {
-      showFieldError('cf-state', 'error-state', 'Please select a state.');
+    // Original address
+    var addressEl = document.getElementById('cf-original-address');
+    var originalAddress = addressEl ? addressEl.value.trim() : '';
+    if (!originalAddress) {
+      showFieldError('cf-original-address', 'error-original-address', 'Please enter the original project address.');
       valid = false;
     }
 
-    // Zip
-    var zip = document.getElementById('cf-zip').value.trim();
-    if (!zip) {
-      showFieldError('cf-zip', 'error-zip', 'Please enter your zip code.');
-      valid = false;
-    } else if (!/^\d{5}$/.test(zip)) {
-      showFieldError('cf-zip', 'error-zip', 'Please enter a valid 5-digit zip code.');
+    // Completion year
+    var yearEl = document.getElementById('cf-completion-year');
+    var completionYear = yearEl ? yearEl.value : '';
+    if (!completionYear) {
+      showFieldError('cf-completion-year', 'error-completion-year', 'Please select the project completion year.');
       valid = false;
     }
 
-    // Project types (at least one checked)
-    var projectChecks = document.querySelectorAll('input[name="project_types"]:checked');
-    if (projectChecks.length === 0) {
-      var ptError = document.getElementById('error-project-types');
-      if (ptError) ptError.textContent = 'Please select at least one project type.';
+    // Issue category
+    var categoryEl = document.getElementById('cf-issue-category');
+    var issueCategory = categoryEl ? categoryEl.value : '';
+    if (!issueCategory) {
+      showFieldError('cf-issue-category', 'error-issue-category', 'Please select an issue category.');
       valid = false;
     }
 
-    // How did you hear
-    var howHeard = document.getElementById('cf-how-heard').value;
-    if (!howHeard) {
-      showFieldError('cf-how-heard', 'error-how-heard', 'Please select how you heard about us.');
+    // Issue description (min 30 chars)
+    var descEl = document.getElementById('cf-issue-description');
+    var issueDescription = descEl ? descEl.value.trim() : '';
+    if (!issueDescription) {
+      showFieldError('cf-issue-description', 'error-issue-description', 'Please describe the issue.');
+      valid = false;
+    } else if (issueDescription.length < 30) {
+      showFieldError('cf-issue-description', 'error-issue-description', 'Please provide at least 30 characters of detail.');
+      valid = false;
+    }
+
+    // Processing consent (required)
+    var consentEl = document.getElementById('cf-processing-consent');
+    if (consentEl && !consentEl.checked) {
+      var consentErr = document.getElementById('error-processing-consent');
+      if (consentErr) consentErr.textContent = 'Please agree to allow Moss Building & Design to process your data.';
       valid = false;
     }
 
@@ -852,9 +929,9 @@
         var statusEl = document.getElementById('contact-form-status');
         if (statusEl) {
           statusEl.innerHTML =
-            'Our security check couldn\'t load. You can still schedule your discovery call: ' +
+            'Our security check couldn\'t load. You can still schedule your warranty appointment: ' +
             '<a href="' + escapeHtml(fallbackUrl) + '" target="_blank" rel="noopener" ' +
-            'style="color: #4c711d; font-weight: 700;">Schedule Directly &rarr;</a>';
+            'style="color: #3F3A33; font-weight: 700;">Schedule Directly &rarr;</a>';
           statusEl.className = 'contact-form-status status-error';
           statusEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -913,57 +990,37 @@
   // ---------------------------------------------------------------------------
 
   function collectFormData() {
-    // Collect project types
-    var projectTypes = [];
-    document.querySelectorAll('input[name="project_types"]:checked').forEach(function(cb) {
-      projectTypes.push(cb.value);
-    });
+    var nameEl = document.getElementById('cf-name');
+    var emailEl = document.getElementById('cf-email');
+    var phoneEl = document.getElementById('cf-phone');
+    var addressEl = document.getElementById('cf-original-address');
+    var yearEl = document.getElementById('cf-completion-year');
+    var categoryEl = document.getElementById('cf-issue-category');
+    var descEl = document.getElementById('cf-issue-description');
 
-    // Collect UTM params
-    var utmParams = {
-      utm_campaign: document.getElementById('cf-utm-campaign').value || '',
-      utm_term: document.getElementById('cf-utm-term').value || '',
-      utm_source: document.getElementById('cf-utm-source').value || '',
-      utm_content: document.getElementById('cf-utm-content').value || '',
-      utm_medium: document.getElementById('cf-utm-medium').value || ''
-    };
-
-    // Read HubSpot tracking cookie for contact association (only exists on mossbuildinganddesign.com)
-    var hutk = '';
-    var cookieMatch = document.cookie.match(/(?:^|;\s*)hubspotutk=([^;]*)/);
-    if (cookieMatch) {
-      hutk = cookieMatch[1];
+    var photoUrls = [];
+    var photoUrlsEl = document.getElementById('cf-photo-urls');
+    if (photoUrlsEl && photoUrlsEl.value) {
+      try {
+        var parsed = JSON.parse(photoUrlsEl.value);
+        if (Array.isArray(parsed)) {
+          photoUrls = parsed;
+        }
+      } catch (e) {
+        photoUrls = [];
+      }
     }
 
     var data = {
-      firstname: document.getElementById('cf-firstname').value.trim(),
-      lastname: document.getElementById('cf-lastname').value.trim(),
-      email: document.getElementById('cf-email').value.trim(),
-      phone: document.getElementById('cf-phone').value.trim(),
-      state: document.getElementById('cf-state').value,
-      zip: document.getElementById('cf-zip').value.trim(),
-      projectTypes: projectTypes,
-      howDidYouHear: document.getElementById('cf-how-heard').value,
-      utmParams: utmParams,
-      hutk: hutk
+      name: nameEl ? nameEl.value.trim() : '',
+      email: emailEl ? emailEl.value.trim() : '',
+      phone: phoneEl ? phoneEl.value.trim() : '',
+      originalAddress: addressEl ? addressEl.value.trim() : '',
+      completionYear: yearEl ? yearEl.value : '',
+      issueCategory: categoryEl ? categoryEl.value : '',
+      issueDescription: descEl ? descEl.value.trim() : '',
+      photoUrls: photoUrls
     };
-
-    // Natalie chat transcript (hidden field, populated externally)
-    var chatTranscript = document.getElementById('cf-natalie-chat-transcript');
-    if (chatTranscript && chatTranscript.value) {
-      data.natalieChatTranscript = chatTranscript.value;
-    }
-
-    // Conditional fields
-    var referralInput = document.getElementById('cf-referral-name');
-    if (referralInput && referralInput.closest('.conditional-field').style.display !== 'none') {
-      data.referralName = referralInput.value.trim();
-    }
-
-    var eventInput = document.getElementById('cf-event-details');
-    if (eventInput && eventInput.closest('.conditional-field').style.display !== 'none') {
-      data.eventDetails = eventInput.value.trim();
-    }
 
     // Consent checkboxes
     var smsConsent = document.getElementById('cf-sms-consent');
@@ -975,6 +1032,8 @@
     // Turnstile token
     if (turnstileWidgetId !== null && typeof turnstile !== 'undefined') {
       data.turnstileToken = turnstile.getResponse(turnstileWidgetId);
+    } else {
+      data.turnstileToken = '';
     }
 
     return data;
@@ -1052,7 +1111,6 @@
     })
     .catch(function(error) {
       showLoading(false);
-      console.error('Contact form submission error:', error);
       reportClientError('form_submit_error', error.message || 'Fetch failed');
 
       // Show fallback link so customer can still schedule
@@ -1062,9 +1120,9 @@
         var statusEl = document.getElementById('contact-form-status');
         if (statusEl) {
           statusEl.innerHTML =
-            'We\'re experiencing a temporary issue. You can still schedule your discovery call: ' +
+            'We\'re experiencing a temporary issue. You can still schedule your warranty appointment: ' +
             '<a href="' + escapeHtml(fallbackUrl) + '" target="_blank" rel="noopener" ' +
-            'style="color: #4c711d; font-weight: 700;">Schedule Directly &rarr;</a>';
+            'style="color: #3F3A33; font-weight: 700;">Schedule Directly &rarr;</a>';
           statusEl.className = 'contact-form-status status-error';
           statusEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -1186,10 +1244,10 @@
   // ---------------------------------------------------------------------------
 
   document.addEventListener('DOMContentLoaded', function() {
-    captureUTMParams();
-    setupConditionalFields();
-    setupPhoneFormatting();
-    setupZipFormatting();
+    // Order matters: setupPhotoDropzone registers a capture-phase listener
+    // on the file input so the file-count gate runs BEFORE setupPhotoUpload's
+    // bubble-phase listener picks up the change event.
+    setupPhotoDropzone();
     setupPhotoUpload();
     initTurnstile();
     updateStepUI();

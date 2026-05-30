@@ -54,14 +54,6 @@
     "help_text": "API key for authenticating booking-callback and client-error requests. Must match CONTACT_API_KEY on Vercel."
   },
   {
-    "name": "excluded_project_types",
-    "label": "Excluded Project Types",
-    "type": "text",
-    "default": "",
-    "required": false,
-    "help_text": "Semicolon-separated list of project type values to hide from the form (e.g., 'Handyman Services;Other'). Use semicolons because some values contain commas. Must match HubSpot property option values exactly."
-  },
-  {
     "name": "fallback_calendar_url",
     "label": "Fallback Calendar URL",
     "type": "text",

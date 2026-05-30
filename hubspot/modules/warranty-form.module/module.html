@@ -8,15 +8,6 @@
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 {% endif %}
 
-{% set firstname_prop = crm_property_definition("contact", "firstname") %}
-{% set lastname_prop = crm_property_definition("contact", "lastname") %}
-{% set email_prop = crm_property_definition("contact", "email") %}
-{% set phone_prop = crm_property_definition("contact", "phone") %}
-{% set state_prop = crm_property_definition("contact", "state_contact_form") %}
-{% set zip_prop = crm_property_definition("contact", "zip") %}
-{% set project_prop = crm_property_definition("contact", "please_select_the_project_types_that_most_closely_match_your_current_request_") %}
-{% set howheard_prop = crm_property_definition("contact", "how_did_you_hear_about_us_") %}
-
 <div class="moss-contact-form-container moss-warranty-form-container">
   <!-- Header -->
   <div class="contact-form-header">
@@ -96,92 +87,80 @@
         </div>
 
         <form id="moss-contact-form" novalidate>
-          <!-- Row 1: First Name / Last Name -->
-          <div class="form-row two-col">
-            <div class="form-group">
-              <label for="cf-firstname">{{ firstname_prop.label }} <span class="required">*</span></label>
-              <input type="text" id="cf-firstname" name="firstname" required autocomplete="given-name">
-              <div class="field-error" id="error-firstname"></div>
-            </div>
-            <div class="form-group">
-              <label for="cf-lastname">{{ lastname_prop.label }} <span class="required">*</span></label>
-              <input type="text" id="cf-lastname" name="lastname" required autocomplete="family-name">
-              <div class="field-error" id="error-lastname"></div>
-            </div>
+          <!-- Row 1: Name -->
+          <div class="form-group full-width">
+            <label for="cf-name">Full Name <span class="required">*</span></label>
+            <input type="text" id="cf-name" name="name" required autocomplete="name" maxlength="200">
+            <div class="field-error" id="error-name"></div>
           </div>
 
           <!-- Row 2: Email / Phone -->
           <div class="form-row two-col">
             <div class="form-group">
-              <label for="cf-email">{{ email_prop.label }} <span class="required">*</span></label>
-              <input type="email" id="cf-email" name="email" required autocomplete="email">
+              <label for="cf-email">Email <span class="required">*</span></label>
+              <input type="email" id="cf-email" name="email" required autocomplete="email" maxlength="254">
               <div class="field-error" id="error-email"></div>
             </div>
             <div class="form-group">
-              <label for="cf-phone">{{ phone_prop.label }} <span class="required">*</span></label>
-              <input type="tel" id="cf-phone" name="phone" required autocomplete="tel">
+              <label for="cf-phone">Phone <span class="required">*</span></label>
+              <input type="tel" id="cf-phone" name="phone" required autocomplete="tel" maxlength="50">
               <div class="field-error" id="error-phone"></div>
             </div>
           </div>
 
-          <!-- Row 3: State / Zip -->
+          <!-- Original Project Address -->
+          <div class="form-group full-width">
+            <label for="cf-original-address">Original Project Address <span class="required">*</span></label>
+            <input type="text" id="cf-original-address" name="originalAddress" required autocomplete="street-address" maxlength="500">
+            <div class="field-error" id="error-original-address"></div>
+          </div>
+
+          <!-- Row: Completion Year / Issue Category -->
           <div class="form-row two-col">
             <div class="form-group">
-              <label for="cf-state">{{ state_prop.label }} <span class="required">*</span></label>
-              <select id="cf-state" name="state_contact_form" required>
+              <label for="cf-completion-year">Original Project Completion Year <span class="required">*</span></label>
+              <select id="cf-completion-year" name="completionYear" required>
                 <option value="">Please Select</option>
-                {% for option in state_prop.options %}
-                  <option value="{{ option.value }}">{{ option.label }}</option>
+                {% for y in range(2026, 2014, -1) %}
+                  <option value="{{ y }}">{{ y }}</option>
                 {% endfor %}
               </select>
-              <div class="field-error" id="error-state"></div>
+              <div class="field-error" id="error-completion-year"></div>
             </div>
             <div class="form-group">
-              <label for="cf-zip">{{ zip_prop.label }} <span class="required">*</span></label>
-              <input type="text" id="cf-zip" name="zip" maxlength="5" required autocomplete="postal-code" inputmode="numeric" pattern="[0-9]{5}">
-              <div class="field-error" id="error-zip"></div>
+              <label for="cf-issue-category">Warranty Issue Category <span class="required">*</span></label>
+              <select id="cf-issue-category" name="issueCategory" required>
+                <option value="">Please Select</option>
+                <option value="Structural">Structural</option>
+                <option value="Cosmetic">Cosmetic</option>
+                <option value="Electrical">Electrical</option>
+                <option value="Plumbing">Plumbing</option>
+                <option value="HVAC">HVAC</option>
+                <option value="Other">Other</option>
+              </select>
+              <div class="field-error" id="error-issue-category"></div>
             </div>
           </div>
 
-          <!-- Project Types (Checkbox Grid) -->
+          <!-- Issue Description -->
           <div class="form-group full-width">
-            <label>{{ project_prop.label }} <span class="required">*</span></label>
-            {% set excluded_list = module.excluded_project_types|split(";")|map("trim") %}
-            <div class="checkbox-grid" id="cf-project-types">
-              {% for option in project_prop.options %}
-                {% if option.value not in excluded_list %}
-                <label class="checkbox-label">
-                  <input type="checkbox" name="project_types" value="{{ option.value }}">
-                  <span>{{ option.label }}</span>
-                </label>
-                {% endif %}
-              {% endfor %}
+            <label for="cf-issue-description">Describe the Issue <span class="required">*</span></label>
+            <textarea id="cf-issue-description" name="issueDescription" required minlength="30" maxlength="5000" rows="6" placeholder="Please describe the warranty issue in detail (minimum 30 characters)."></textarea>
+            <div class="field-error" id="error-issue-description"></div>
+          </div>
+
+          <!-- Photos (optional, up to 5 files, JPG/PNG/WebP, 5 MB each) -->
+          <div class="form-group full-width">
+            <label for="cf-photo-input">Photos <span class="optional-label">(optional, up to 5 — JPG, PNG, or WebP, 5 MB each)</span></label>
+            <div class="photo-upload-area" id="cf-photo-dropzone">
+              <div class="photo-upload-prompt">
+                <strong>Drag &amp; drop photos here</strong>
+                <span>or click to browse</span>
+                <span class="photo-upload-hint">JPG, PNG, or WebP &mdash; up to 5 files, 5 MB each</span>
+              </div>
+              <input type="file" id="cf-photo-input" name="photos" multiple accept="image/jpeg,image/jpg,image/png,image/webp" class="cf-photo-file-input">
             </div>
-            <div class="field-error" id="error-project-types"></div>
-          </div>
-
-          <!-- How Did You Hear About Us -->
-          <div class="form-group full-width">
-            <label for="cf-how-heard">{{ howheard_prop.label }} <span class="required">*</span></label>
-            <select id="cf-how-heard" name="how_did_you_hear_about_us_" required>
-              <option value="">Please Select</option>
-              {% for option in howheard_prop.options %}
-                <option value="{{ option.value }}">{{ option.label }}</option>
-              {% endfor %}
-            </select>
-            <div class="field-error" id="error-how-heard"></div>
-          </div>
-
-          <!-- Conditional: Referral Name -->
-          <div class="form-group full-width conditional-field" id="referral-name-group" style="display: none;">
-            <label for="cf-referral-name">Referral Name</label>
-            <input type="text" id="cf-referral-name" name="referral_name">
-          </div>
-
-          <!-- Conditional: Event Details -->
-          <div class="form-group full-width conditional-field" id="event-details-group" style="display: none;">
-            <label for="cf-event-details">Event Details</label>
-            <input type="text" id="cf-event-details" name="event_details">
+            <div class="field-error" id="error-photo-input"></div>
           </div>
 
           <!-- SMS Consent -->
@@ -189,7 +168,7 @@
           <div class="form-group full-width consent-group">
             <label class="checkbox-label consent-label">
               <input type="checkbox" id="cf-sms-consent" name="sms_consent">
-              <span>I agree to receive text messages from Moss Building & Design. Message and data rates may apply. Reply STOP to opt out.</span>
+              <span>I agree to receive text messages from Moss Building &amp; Design. Message and data rates may apply. Reply STOP to opt out.</span>
             </label>
           </div>
           {% endif %}
@@ -197,18 +176,11 @@
           <!-- Processing Consent -->
           <div class="form-group full-width consent-group">
             <label class="checkbox-label consent-label">
-              <input type="checkbox" id="cf-processing-consent" name="processing_consent">
-              <span>I agree to allow Moss Building & Design to store and process my personal data.</span>
+              <input type="checkbox" id="cf-processing-consent" name="processing_consent" required>
+              <span>I agree to allow Moss Building &amp; Design to store and process my personal data. <span class="required">*</span></span>
             </label>
+            <div class="field-error" id="error-processing-consent"></div>
           </div>
-
-          <!-- Hidden Fields -->
-          <input type="hidden" id="cf-natalie-chat-transcript" name="natalie_chat_transcript">
-          <input type="hidden" id="cf-utm-campaign" name="utm_campaign">
-          <input type="hidden" id="cf-utm-term" name="utm_term">
-          <input type="hidden" id="cf-utm-source" name="utm_source">
-          <input type="hidden" id="cf-utm-content" name="utm_content">
-          <input type="hidden" id="cf-utm-medium" name="utm_medium">
 
           <!-- Turnstile Widget -->
           {% if module.turnstile_site_key %}
@@ -268,15 +240,15 @@
             <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
           </div>
           <h4>You're All Set!</h4>
-          <p>Your discovery meeting has been scheduled. We look forward to learning about your project.</p>
+          <p>Your warranty appointment has been scheduled. A member of our team will follow up to confirm.</p>
 
           <div class="confirmation-next-steps">
             <h5>What Happens Next</h5>
             <ul>
               <li>You'll receive a calendar invitation via email</li>
-              <li>Your Project Developer will join the Teams meeeting at the scheduled time</li>
-              <li>The meeting is a quick 30-minute virtual chat</li>
-              <li>No commitment required &mdash; just a friendly conversation</li>
+              <li>Our team will arrive at the scheduled time to inspect the issue</li>
+              <li>We'll diagnose the problem on-site and explain next steps</li>
+              <li>If covered under warranty, we'll schedule the repair at no cost to you</li>
             </ul>
           </div>
         </div>
@@ -292,9 +264,6 @@
     submitEndpointUrl: '{{ module.submit_endpoint_url }}',
     turnstileSiteKey: '{{ module.turnstile_site_key }}',
     callbackApiKey: '{{ module.callback_api_key }}',
-    fallbackCalendarUrl: '{{ module.fallback_calendar_url }}',
-    referralValue: '{{ howheard_prop.options|selectattr("label", "equalto", "Referred by a Friend")|map("value")|first }}',
-    communitySponsorshipValue: '{{ howheard_prop.options|selectattr("label", "equalto", "Community Sponsorship")|map("value")|first }}',
-    eventValue: '{{ howheard_prop.options|selectattr("label", "equalto", "Event")|map("value")|first }}'
+    fallbackCalendarUrl: '{{ module.fallback_calendar_url }}'
   };
 </script>
